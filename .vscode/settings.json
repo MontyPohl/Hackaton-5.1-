@@ -1,0 +1,15 @@
+{
+    "sqltools.connections": [
+        {
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "aws-0-us-west-2.pooler.supabase.com",
+            "port": 6543,
+            "driver": "PostgreSQL",
+            "name": "Hackaton",
+            "database": "postgres",
+            "username": "postgres.dmijrqufkllarvdlvvfn",
+            "password": "hackatonjaiko"
+        }
+    ]
+}

@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --brand-orange: #f97316;
+    --brand-orange-dark: #ea580c;
+    --brand-dark: #1a0a00;
+    --brand-cream: #fff7ed;
+    --radius: 12px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-brand-cream text-brand-dark font-body antialiased;
+    min-height: 100dvh;
+  }
+
+  h1, h2, h3, h4, h5 {
+    @apply font-display;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary-500 hover:bg-primary-600 text-white font-display font-semibold
+           px-5 py-2.5 rounded-xl transition-all duration-200 active:scale-95
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply border-2 border-primary-500 text-primary-600 hover:bg-primary-50
+           font-display font-semibold px-5 py-2.5 rounded-xl transition-all duration-200;
+  }
+
+  .btn-ghost {
+    @apply text-primary-600 hover:bg-primary-50 font-semibold px-4 py-2 rounded-xl transition-all;
+  }
+
+  .card {
+    @apply bg-white rounded-2xl shadow-sm border border-orange-100 p-5;
+  }
+
+  .input {
+    @apply w-full border border-orange-200 rounded-xl px-4 py-2.5 font-body
+           focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-transparent
+           placeholder:text-orange-300 bg-white transition-all;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold;
+  }
+
+  .badge-verified {
+    @apply badge bg-emerald-100 text-emerald-700;
+  }
+
+  .badge-orange {
+    @apply badge bg-primary-100 text-primary-700;
+  }
+}
+
+/* Leaflet overrides */
+.leaflet-container {
+  @apply rounded-2xl font-body;
+}

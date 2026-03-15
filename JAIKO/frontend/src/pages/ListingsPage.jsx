@@ -1,0 +1,135 @@
+import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
+import { Map, LayoutGrid, Plus } from 'lucide-react'
+import api from '../services/api'
+import ListingCard from '../components/ui/ListingCard'
+import { Spinner, EmptyState } from '../components/ui'
+import useAuthStore from '../context/authStore'
+
+const CITIES = ['Asunción', 'San Lorenzo', 'Luque', 'Fernando de la Mora', 'Lambaré', 'Capiatá', 'Encarnación', 'Ciudad del Este']
+
+export default function ListingsPage() {
+  const { isAuthenticated } = useAuthStore()
+  const [listings, setListings] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [view, setView] = useState('grid') // grid | map
+  const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [JaikoMap, setJaikoMap] = useState(null)
+
+  const [filters, setFilters] = useState({
+    city: 'Asunción',
+    min_price: '',
+    max_price: '',
+    pets_allowed: '',
+    smoking_allowed: '',
+  })
+
+  useEffect(() => {
+    const params = new URLSearchParams({ page: 1, per_page: 24, city: filters.city })
+    if (filters.min_price) params.set('min_price', filters.min_price)
+    if (filters.max_price) params.set('max_price', filters.max_price)
+    if (filters.pets_allowed) params.set('pets_allowed', filters.pets_allowed)
+    if (filters.smoking_allowed) params.set('smoking_allowed', filters.smoking_allowed)
+
+    setLoading(true)
+    api.get(`/listings/?${params}`)
+      .then(({ data }) => {
+        setListings(data.listings)
+        setTotalPages(data.pages)
+        setPage(1)
+      })
+      .finally(() => setLoading(false))
+  }, [filters])
+
+  // Lazy-load map only when needed
+  useEffect(() => {
+    if (view === 'map' && !JaikoMap) {
+      import('../components/map/JaikoMap').then(m => setJaikoMap(() => m.default))
+    }
+  }, [view])
+
+  const mapMarkers = listings
+    .filter(l => l.latitude && l.longitude)
+    .map(l => ({ lat: l.latitude, lng: l.longitude, title: l.title,
+      description: `₲ ${(l.total_price / 1_000_000).toFixed(1)}M/mes`, link: `/listings/${l.id}` }))
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 py-8">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
+        <div>
+          <h1 className="font-display font-extrabold text-3xl">Departamentos</h1>
+          <p className="text-orange-400 text-sm mt-1">{listings.length} publicaciones disponibles</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {/* View toggle */}
+          <div className="flex rounded-xl border border-orange-200 overflow-hidden">
+            <button onClick={() => setView('grid')}
+              className={`px-3 py-2 flex items-center gap-1.5 text-sm font-semibold transition-colors ${view === 'grid' ? 'bg-primary-500 text-white' : 'text-orange-400 hover:bg-orange-50'}`}>
+              <LayoutGrid size={15} /> Grid
+            </button>
+            <button onClick={() => setView('map')}
+              className={`px-3 py-2 flex items-center gap-1.5 text-sm font-semibold transition-colors ${view === 'map' ? 'bg-primary-500 text-white' : 'text-orange-400 hover:bg-orange-50'}`}>
+              <Map size={15} /> Mapa
+            </button>
+          </div>
+          {isAuthenticated() && (
+            <Link to="/listings/new" className="btn-primary flex items-center gap-1.5 text-sm">
+              <Plus size={15} /> Publicar
+            </Link>
+          )}
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="card mb-6 flex flex-wrap gap-4 items-end">
+        <div>
+          <label className="block text-xs font-semibold text-orange-400 mb-1 uppercase tracking-wide">Ciudad</label>
+          <select className="input w-44" value={filters.city}
+            onChange={e => setFilters(f => ({ ...f, city: e.target.value }))}>
+            {CITIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-orange-400 mb-1 uppercase tracking-wide">Precio min (₲)</label>
+          <input className="input w-36" type="number" value={filters.min_price} placeholder="0"
+            onChange={e => setFilters(f => ({ ...f, min_price: e.target.value }))} />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-orange-400 mb-1 uppercase tracking-wide">Precio max (₲)</label>
+          <input className="input w-36" type="number" value={filters.max_price} placeholder="Sin límite"
+            onChange={e => setFilters(f => ({ ...f, max_price: e.target.value }))} />
+        </div>
+        <div className="flex gap-2">
+          {[['pets_allowed', '🐾 Mascotas'], ['smoking_allowed', '🚬 Fumadores']].map(([key, label]) => (
+            <button key={key} type="button"
+              onClick={() => setFilters(f => ({ ...f, [key]: f[key] === 'true' ? '' : 'true' }))}
+              className={`px-3 py-2 rounded-xl border-2 text-sm font-semibold transition-all ${filters[key] === 'true' ? 'border-primary-500 bg-primary-50 text-primary-700' : 'border-orange-200 text-orange-400 hover:border-orange-300'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Content */}
+      {loading ? (
+        <div className="flex justify-center py-20"><Spinner size="lg" /></div>
+      ) : view === 'map' ? (
+        <div className="h-[600px]">
+          {JaikoMap ? (
+            <JaikoMap markers={mapMarkers} height="600px" />
+          ) : (
+            <div className="flex justify-center items-center h-full"><Spinner /></div>
+          )}
+        </div>
+      ) : listings.length === 0 ? (
+        <EmptyState icon="🏠" title="No hay publicaciones" description="Sé el primero en publicar en esta ciudad." />
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+          {listings.map(l => <ListingCard key={l.id} listing={l} />)}
+        </div>
+      )}
+    </div>
+  )
+}
