@@ -11,5 +11,6 @@
             "username": "postgres.dmijrqufkllarvdlvvfn",
             "password": "hackatonjaiko"
         }
-    ]
+    ],
+    "python-envs.defaultEnvManager": "ms-python.python:system"
 }
