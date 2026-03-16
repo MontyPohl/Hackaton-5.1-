@@ -1,142 +1,115 @@
 import { Link } from 'react-router-dom'
-import { Search, Building2, Users, ShieldCheck, ArrowRight } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
 import useAuthStore from '../context/authStore'
 
 const FEATURES = [
-  {
-    icon: Search,
-    title: 'Encontrá tu roomie',
-    desc: 'Algoritmo de compatibilidad al 80%+ basado en presupuesto, hábitos y horarios.',
-    to: '/search',
-    color: 'bg-orange-100 text-primary-600',
-  },
-  {
-    icon: Building2,
-    title: 'Publicaciones',
-    desc: 'Encontrá departamentos y habitaciones disponibles en todo Paraguay.',
-    to: '/listings',
-    color: 'bg-emerald-100 text-emerald-600',
-  },
-  {
-    icon: Users,
-    title: 'Grupos',
-    desc: 'Armá un grupo con roomies compatibles y buscen vivienda juntos.',
-    to: '/groups',
-    color: 'bg-blue-100 text-blue-600',
-  },
-  {
-    icon: ShieldCheck,
-    title: 'Perfiles verificados',
-    desc: 'Sistema de verificación de identidad para mayor confianza y seguridad.',
-    to: '/verification',
-    color: 'bg-purple-100 text-purple-600',
-  },
+  { icon: '✅', title: 'Perfiles verificados', desc: 'Verificamos identidad y antecedentes para que siempre sepas con quién estás conectando.' },
+  { icon: '🤝', title: 'Compatibilidad inteligente', desc: 'Analizamos tus hábitos y preferencias para mostrarte solo los perfiles más compatibles.' },
+  { icon: '💰', title: 'Ahorrá hasta un 50%', desc: 'Dividí el alquiler y los servicios entre dos y empezá tu independencia sin presión económica.' },
+  { icon: '🔒', title: 'Chat seguro y privado', desc: 'Tu número y datos personales permanecen privados hasta que decidís compartirlos.' },
+  { icon: '⭐', title: 'Sistema de reseñas', desc: 'Valoraciones reales de personas que ya compartieron experiencias de convivencia.' },
+  { icon: '📍', title: 'Búsqueda por zona', desc: 'Filtrá por barrio, presupuesto, estilo de vida y encontrá tu match perfecto.' },
 ]
 
 export default function HomePage() {
   const { isAuthenticated } = useAuthStore()
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col font-main bg-[#F4F7FF] text-[#1E293B]">
       {/* Hero */}
-      <section className="bg-brand-dark text-brand-cream overflow-hidden relative">
+      <section className="relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #1E4EA6 0%, #2563C8 50%, #3B82F6 100%)' }}>
         <div
-          className="absolute inset-0 opacity-10"
+          className="absolute inset-0"
           style={{
-            backgroundImage: `radial-gradient(circle at 20% 50%, #f97316 0%, transparent 50%),
-                              radial-gradient(circle at 80% 20%, #ea580c 0%, transparent 40%)`,
+            backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
           }}
         />
-        <div className="relative max-w-5xl mx-auto px-4 py-24 md:py-36 text-center">
-          <div className="inline-flex items-center gap-2 bg-primary-500/20 border border-primary-500/30 rounded-full px-4 py-1.5 text-sm font-semibold text-primary-300 mb-6">
-            🇵🇾 Solo en Paraguay por ahora
+        <div className="relative max-w-5xl mx-auto px-4 py-28 text-center text-white">
+          <div className="inline-block bg-[rgba(245,166,35,0.2)] border border-[rgba(245,166,35,0.5)] text-[#FBBF24] text-xs font-bold rounded-full px-4 py-1 mb-5">
+            ✨ La forma más segura de encontrar roomie
           </div>
-          <h1 className="font-display font-extrabold text-5xl md:text-7xl leading-none mb-6">
-            Encontrá tu<br />
-            <span className="text-primary-400">roomie ideal</span>
+          <h1 className="font-alt font-bold text-5xl md:text-7xl leading-tight mb-6">
+            Conecta con tu <span className="text-[#FBBF24]">roomie ideal</span> y comparte gastos
           </h1>
-          <p className="text-orange-200 text-lg md:text-xl max-w-2xl mx-auto mb-10 font-light">
-            JAIKO! conecta personas que buscan compartir alquiler con quienes publican
-            habitaciones y departamentos. Compatible, seguro y simple.
+          <p className="text-white opacity-85 text-lg md:text-xl max-w-2xl mx-auto mb-10 leading-relaxed">
+            ¿Querés independizarte pero los gastos son muchos? Jaiko te conecta con personas en tu misma situación para que puedan compartir el alquiler juntos.
           </p>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+          <div className="flex flex-col sm:flex-row gap-4 justify-center flex-wrap">
             {isAuthenticated() ? (
-              <Link to="/search" className="btn-primary text-lg px-8 py-3 flex items-center gap-2 justify-center">
-                Buscar roomies <ArrowRight size={18} />
+              <Link to="/search" className="btn-primary px-8 py-4 bg-[#F5A623] font-bold rounded-lg hover:bg-[#D4891A] transition">
+                Encontrar mi roomie <ArrowRight size={18} />
               </Link>
             ) : (
-              <Link to="/login" className="btn-primary text-lg px-8 py-3 flex items-center gap-2 justify-center">
+              <Link to="/login" className="btn-primary px-8 py-4 bg-[#F5A623] font-bold rounded-lg hover:bg-[#D4891A] transition">
                 Empezar ahora <ArrowRight size={18} />
               </Link>
             )}
-            <Link to="/listings" className="btn-secondary text-lg px-8 py-3 border-primary-400 text-primary-300 hover:bg-primary-500/10">
-              Ver departamentos
+            <Link to="/listings" className="btn-secondary px-8 py-4 border border-white text-white font-bold rounded-lg hover:bg-white/20 transition">
+              Ver perfiles
             </Link>
+          </div>
+          <div className="hero-stats flex flex-wrap justify-center gap-10 mt-12">
+            <div className="stat text-center"><div className="stat-num font-alt text-2xl font-bold text-[#FBBF24]">2,400+</div><div className="stat-label text-xs opacity-75 mt-1">Usuarios activos</div></div>
+            <div className="stat text-center"><div className="stat-num font-alt text-2xl font-bold text-[#FBBF24]">850+</div><div className="stat-label text-xs opacity-75 mt-1">Conexiones exitosas</div></div>
+            <div className="stat text-center"><div className="stat-num font-alt text-2xl font-bold text-[#FBBF24]">98%</div><div className="stat-label text-xs opacity-75 mt-1">Perfiles verificados</div></div>
           </div>
         </div>
       </section>
+{/* How it works – versión compacta y centrada */}
+<section className="section bg-[#F4F7FF] py-20">
+  <h2 className="section-title text-center mb-4 text-4xl md:text-5xl font-alt font-bold">
+    ¿Cómo <span className="text-[#2563C8]">funciona</span>?
+  </h2>
+  <p className="section-sub text-center mb-12 text-lg md:text-xl text-[#64748B] max-w-2xl mx-auto">
+    En solo 4 pasos estás conectando con tu futuro roomie de manera segura y divertida
+  </p>
+  <div className="flex flex-wrap justify-center gap-6">
+    {[
+      { step: '1', icon: '📝', title: 'Creá tu perfil', desc: 'Contanos sobre vos, tus hábitos, tu presupuesto y la zona donde querés vivir.', bg: 'from-[#EFF6FF] to-[#DBEAFE]' },
+      { step: '2', icon: '🔍', title: 'Explorá perfiles', desc: 'Nuestro sistema te muestra personas compatibles según tus preferencias de vida.', bg: 'from-[#FFF7ED] to-[#FFEDD5]' },
+      { step: '3', icon: '💬', title: 'Conectá y acordá', desc: 'Chatéen, conózcanse y definan los términos del alquiler compartido juntos.', bg: 'from-[#F0FDF4] to-[#DCFCE7]' },
+      { step: '4', icon: '🏡', title: '¡A vivir!', desc: 'Mudense y disfruten de su nuevo hogar compartiendo los gastos equitativamente.', bg: 'from-[#FFF1F2] to-[#FFE4E6]' },
+    ].map(({ step, icon, title, desc, bg }) => (
+      <div
+        key={step}
+        className="relative bg-white p-5 w-56 rounded-2xl shadow-sm hover:shadow-md transition-transform transform hover:-translate-y-1"
+      >
+        <div className="step-num absolute -top-6 left-1/2 transform -translate-x-1/2 w-12 h-12 rounded-full bg-gradient-to-r from-[#2563C8] to-[#3B82F6] flex items-center justify-center text-white text-lg font-bold shadow-md">
+          {step}
+        </div>
+        <div className={`step-icon w-16 h-16 mx-auto mb-3 rounded-xl flex items-center justify-center text-4xl bg-gradient-to-br ${bg} shadow-inner`}>
+          {icon}
+        </div>
+        <h3 className="font-alt font-bold text-base text-[#1E293B] mb-1 text-center">{title}</h3>
+        <p className="text-sm text-[#64748B] text-center">{desc}</p>
+      </div>
+    ))}
+  </div>
+</section>
 
-      {/* Features */}
-      <section className="max-w-6xl mx-auto px-4 py-20">
-        <h2 className="font-display font-bold text-3xl md:text-4xl text-center mb-4">
-          Todo lo que necesitás
-        </h2>
-        <p className="text-center text-orange-400 mb-12 max-w-xl mx-auto">
-          Una sola plataforma para encontrar roomies compatibles, publicar vivienda y coordinar la búsqueda en grupo.
+      {/* Features – versión compacta y centrada */}
+      <section className="section py-20 bg-white">
+        <h2 className="section-title text-center mb-4 text-4xl md:text-5xl font-alt font-bold">
+  ¿Por qué elegir <span className="text-[#2563C8]">JAIK</span><span className="text-[#FBBF24]">O!</span>?
+</h2>
+        <p className="section-sub text-center mb-12 text-lg md:text-xl text-[#64748B] max-w-2xl mx-auto">
+          Diseñado para que encontrar roomie sea seguro, rápido y sin dramas
         </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-          {FEATURES.map(({ icon: Icon, title, desc, to, color }) => (
-            <Link key={to} to={to}
-              className="card hover:shadow-lg hover:-translate-y-1 transition-all duration-200 group flex flex-col gap-3">
-              <div className={`w-12 h-12 rounded-2xl ${color} flex items-center justify-center`}>
-                <Icon size={22} />
+        <div className="features-grid flex flex-wrap justify-center gap-4">
+          {FEATURES.map(({ icon, title, desc }) => (
+            <div
+              key={title}
+              className="feat-card flex flex-col items-center text-center gap-2 p-5 w-64 rounded-2xl border border-[#E2E8F0] shadow-sm hover:shadow-md transition-transform transform hover:-translate-y-1 bg-white"
+            >
+              <div className="feat-icon w-14 h-14 flex items-center justify-center text-3xl rounded-xl mb-2 bg-gradient-to-br from-[#EFF6FF] to-[#DBEAFE] shadow-inner">
+                {icon}
               </div>
-              <h3 className="font-display font-bold text-lg">{title}</h3>
-              <p className="text-sm text-gray-500 flex-1">{desc}</p>
-              <span className="text-primary-500 text-sm font-semibold flex items-center gap-1 group-hover:gap-2 transition-all">
-                Ver más <ArrowRight size={14} />
-              </span>
-            </Link>
+              <h3 className="font-alt font-bold text-base text-[#1E293B]">{title}</h3>
+              <p className="text-sm text-[#64748B]">{desc}</p>
+            </div>
           ))}
         </div>
       </section>
-
-      {/* How it works */}
-      <section className="bg-white border-y border-orange-100 py-20 px-4">
-        <div className="max-w-4xl mx-auto">
-          <h2 className="font-display font-bold text-3xl md:text-4xl text-center mb-12">
-            ¿Cómo funciona?
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {[
-              { step: '01', title: 'Creá tu perfil', desc: 'Completá tus preferencias de convivencia: presupuesto, mascotas, horarios y más.' },
-              { step: '02', title: 'Encontrá compatibles', desc: 'El algoritmo muestra perfiles con 80%+ de compatibilidad con vos.' },
-              { step: '03', title: 'Conectate y mudarte', desc: 'Chateá, formá un grupo y encontrá el departamento ideal juntos.' },
-            ].map(({ step, title, desc }) => (
-              <div key={step} className="text-center flex flex-col items-center gap-3">
-                <div className="w-14 h-14 rounded-2xl bg-primary-500 text-white font-display font-extrabold text-xl flex items-center justify-center shadow-lg shadow-primary-200">
-                  {step}
-                </div>
-                <h3 className="font-display font-bold text-lg">{title}</h3>
-                <p className="text-sm text-gray-500">{desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* CTA */}
-      {!isAuthenticated() && (
-        <section className="max-w-2xl mx-auto px-4 py-20 text-center">
-          <h2 className="font-display font-extrabold text-4xl mb-4">
-            Listo para encontrar tu <span className="text-primary-500">roomie</span>?
-          </h2>
-          <p className="text-gray-500 mb-8">Creá tu cuenta con Google y empezá a buscar hoy.</p>
-          <Link to="/login" className="btn-primary text-lg px-10 py-3">
-            Crear cuenta gratis
-          </Link>
-        </section>
-      )}
     </div>
   )
 }
