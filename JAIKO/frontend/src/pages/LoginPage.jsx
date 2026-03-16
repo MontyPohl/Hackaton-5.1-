@@ -1,76 +1,175 @@
-import { useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { GoogleLogin } from '@react-oauth/google'
-import { toast } from 'react-hot-toast'
-import useAuthStore from '../context/authStore'
+import { useState, useEffect } from "react"
+import { useNavigate } from "react-router-dom"
+import { Loader2 } from "lucide-react"
+import api from "../services/api"
+import { toast } from "react-hot-toast"
 
 export default function LoginPage() {
-  const { loginWithGoogle, isAuthenticated, loading } = useAuthStore()
   const navigate = useNavigate()
 
-  useEffect(() => {
-    if (isAuthenticated()) navigate('/', { replace: true })
-  }, [])
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [remember, setRemember] = useState(false)
+  const [loading, setLoading] = useState(false)
 
-  const handleSuccess = async (credentialResponse) => {
-    const result = await loginWithGoogle(credentialResponse.credential)
-    if (result.success) {
-      toast.success('¡Bienvenido a JAIKO!')
-      navigate(result.isNewUser ? '/profile/edit' : '/', { replace: true })
-    } else {
-      toast.error(result.error || 'Error al iniciar sesión')
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("token");
+    if (token) {
+      localStorage.setItem("token", token);
+      toast.success("¡Bienvenido a Jaiko!");
+      navigate("/profile");
+    }
+  }, [navigate]);
+
+  const handleLogin = async (e) => {
+    e.preventDefault()
+    if (!email || !password) {
+      toast.error("Completa todos los campos")
+      return
+    }
+    try {
+      setLoading(true)
+      const { data } = await api.post("/auth/login", { email, password })
+      if (remember) {
+        localStorage.setItem("token", data.token)
+      } else {
+        sessionStorage.setItem("token", data.token)
+      }
+      toast.success("¡Bienvenido de vuelta!")
+      navigate("/profile")
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Credenciales incorrectas")
+    } finally {
+      setLoading(false)
     }
   }
 
+  const handleGoogleLogin = () => {
+    const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:3000";
+    window.location.href = `${apiUrl}/auth/google`;
+  }
+
   return (
-    <div className="min-h-dvh bg-brand-dark flex items-center justify-center p-4">
-      {/* Background decoration */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-20 -right-20 w-96 h-96 bg-primary-500/10 rounded-full blur-3xl" />
-        <div className="absolute -bottom-20 -left-20 w-96 h-96 bg-primary-700/10 rounded-full blur-3xl" />
-      </div>
-
-      <div className="relative w-full max-w-md">
-        {/* Card */}
-        <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-3xl p-8 md:p-10 text-center shadow-2xl">
-          {/* Logo */}
-          <div className="font-display font-extrabold text-5xl text-primary-400 mb-2">
-            JAIKO<span className="text-white">!</span>
-          </div>
-          <p className="text-orange-300 text-sm mb-8 font-light">
-            La plataforma para encontrar roomies en Paraguay 🇵🇾
-          </p>
-
-          <div className="flex flex-col items-center gap-4">
-            <p className="text-orange-200 text-sm">Ingresá con tu cuenta de Google</p>
-
-            {loading ? (
-              <div className="w-8 h-8 border-4 border-primary-300 border-t-primary-500 rounded-full animate-spin" />
-            ) : (
-              <div className="w-full flex justify-center">
-                <GoogleLogin
-                  onSuccess={handleSuccess}
-                  onError={() => toast.error('Error con Google. Intentá de nuevo.')}
-                  theme="filled_black"
-                  shape="rectangular"
-                  size="large"
-                  width="300"
-                  text="continue_with"
-                  locale="es"
-                />
-              </div>
-            )}
-          </div>
-
-          <p className="text-orange-400/60 text-xs mt-8 leading-relaxed">
-            Al ingresar aceptás nuestros Términos de Uso y Política de Privacidad.
-            Tu información está protegida.
+    <div className="min-h-screen flex items-center justify-center bg-[#F4F7FF] px-4 font-['Nunito']">
+      <div className="w-full max-w-[460px]">
+        
+        {/* Logo: Jaiko! */}
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-extrabold text-[#2563C8] font-['Poppins'] tracking-tight">
+            Jaik<span className="text-[#F5A623]">o!</span>
+          </h1>
+          <p className="text-[#64748B] text-sm mt-1 font-semibold">
+            Conecta con tu roomie ideal
           </p>
         </div>
 
-        <p className="text-center text-orange-400/40 text-xs mt-6">
-          © {new Date().getFullYear()} JAIKO! – Solo en Paraguay
-        </p>
+        <div className="bg-white p-10 rounded-[24px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-[#E2E8F0]">
+          
+          <div className="flex bg-[#F4F7FF] rounded-[14px] p-1 mb-8">
+            <button className="flex-1 py-2.5 text-sm font-bold bg-white text-[#2563C8] rounded-[10px] shadow-sm">
+              Ingresar
+            </button>
+            <button
+              onClick={() => navigate("/register")}
+              className="flex-1 py-2.5 text-sm font-bold text-[#64748B] hover:text-[#2563C8] transition-colors"
+            >
+              Crear cuenta
+            </button>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-5">
+            <div>
+              <label className="block text-[13px] font-bold text-[#1E293B] mb-2">
+                Correo electrónico
+              </label>
+              <input
+                type="email"
+                placeholder="tu@correo.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                /* CAMBIO: Borde 2px y sombra más ancha al hacer focus */
+                className="w-full px-4 py-3.5 border-2 border-[#E2E8F0] rounded-[14px] text-sm outline-none transition-all focus:border-[#F5A623] focus:ring-4 focus:ring-[#F5A623]/20 placeholder:text-gray-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[13px] font-bold text-[#1E293B] mb-2">
+                Contraseña
+              </label>
+              <input
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                /* CAMBIO: Borde 2px y sombra más ancha al hacer focus */
+                className="w-full px-4 py-3.5 border-2 border-[#E2E8F0] rounded-[14px] text-sm outline-none transition-all focus:border-[#F5A623] focus:ring-4 focus:ring-[#F5A623]/20 placeholder:text-gray-400"
+              />
+            </div>
+
+            <div className="flex items-center justify-between text-[13px]">
+              <label className="flex items-center gap-2 text-[#64748B] cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={() => setRemember(!remember)}
+                  className="accent-[#2563C8] w-4 h-4 rounded border-[#E2E8F0]"
+                />
+                <span className="group-hover:text-[#1E293B] transition-colors">Recordar sesión</span>
+              </label>
+              <button type="button" className="text-[#2563C8] font-bold hover:text-[#1E4EA6]">
+                ¿Olvidaste tu contraseña?
+              </button>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-[#2563C8] hover:bg-[#1E4EA6] text-white py-4 rounded-[14px] font-extrabold text-base shadow-lg shadow-blue-700/10 transition-all transform active:scale-[0.98] flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="animate-spin" size={20} />
+                  Ingresando...
+                </>
+              ) : (
+                "Ingresar"
+              )}
+            </button>
+          </form>
+
+          <div className="relative text-center my-8">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-[#E2E8F0]"></div>
+            </div>
+            <span className="relative px-4 bg-white text-[#64748B] text-[13px] font-medium">
+              o ingresá con
+            </span>
+          </div>
+
+          <button
+            onClick={handleGoogleLogin}
+            type="button"
+            className="w-full border-2 border-[#E2E8F0] py-3.5 rounded-[14px] hover:bg-[#F8FAFC] font-bold text-[#1E293B] flex items-center justify-center gap-3 transition-all hover:border-[#F5A623]/60"
+          >
+            <img
+              src="https://www.svgrepo.com/show/475656/google-color.svg"
+              className="w-5"
+              alt="Google"
+            />
+            Continuar con Google
+          </button>
+
+          <p className="text-center text-[13px] text-[#64748B] mt-8">
+            ¿No tenés cuenta?{" "}
+            <button
+              onClick={() => navigate("/register")}
+              className="text-[#2563C8] font-extrabold hover:underline"
+            >
+              Registrate gratis
+            </button>
+          </p>
+        </div>
       </div>
     </div>
   )
