@@ -12,7 +12,11 @@
             "password": "hackatonjaiko"
         }
     ],
-    "python.analysis.extraPaths": ["./backend", "./backend/app"],
+    "python.analysis.extraPaths": [
+        "./backend",
+        "./backend/app"
+    ],
     "python.analysis.typeCheckingMode": "basic",
-    "python.defaultInterpreterPath": "backend/.venv/Scripts/python.exe" 
+    "python.defaultInterpreterPath": "backend/.venv/Scripts/python.exe",
+    "python-envs.defaultEnvManager": "ms-python.python:system"
 }
