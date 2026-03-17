@@ -23,8 +23,8 @@ export default {
         },
       },
       fontFamily: {
-        display: ['"Syne"', 'sans-serif'],
-        body:    ['"Plus Jakarta Sans"', 'sans-serif'],
+        display: ['"Poppins"', 'sans-serif'],
+        body:    ['"Nunito"', 'sans-serif'],
         mono:    ['"JetBrains Mono"', 'monospace'],
       },
     },
