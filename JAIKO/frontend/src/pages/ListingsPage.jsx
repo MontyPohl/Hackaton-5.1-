@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { Map, LayoutGrid, Plus } from 'lucide-react'
-import api from '../services/api'
+import api, { getRoomies } from '../services/api'
 import ListingCard from '../components/ui/ListingCard'
+import ProfileCard from '../components/ui/ProfileCard'
 import { Spinner, EmptyState } from '../components/ui'
 import useAuthStore from '../context/authStore'
 
@@ -11,6 +12,7 @@ const CITIES = ['Asunción', 'San Lorenzo', 'Luque', 'Fernando de la Mora', 'Lam
 export default function ListingsPage() {
   const { isAuthenticated } = useAuthStore()
   const [listings, setListings] = useState([])
+  const [roomies, setRoomies] = useState([])
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState('grid') // grid | map
   const [page, setPage] = useState(1)
@@ -25,6 +27,7 @@ export default function ListingsPage() {
     smoking_allowed: '',
   })
 
+  // Traer listings según filtros
   useEffect(() => {
     const params = new URLSearchParams({ page: 1, per_page: 24, city: filters.city })
     if (filters.min_price) params.set('min_price', filters.min_price)
@@ -42,17 +45,47 @@ export default function ListingsPage() {
       .finally(() => setLoading(false))
   }, [filters])
 
-  // Lazy-load map only when needed
+  // Lazy-load JaikoMap
   useEffect(() => {
     if (view === 'map' && !JaikoMap) {
       import('../components/map/JaikoMap').then(m => setJaikoMap(() => m.default))
     }
   }, [view])
 
+  // Traer roomies para el mapa
+  useEffect(() => {
+    if (view === 'map') {
+      getRoomies().then(setRoomies)
+    }
+  }, [view])
+
+  // Markers de listings (grid view)
   const mapMarkers = listings
     .filter(l => l.latitude && l.longitude)
-    .map(l => ({ lat: l.latitude, lng: l.longitude, title: l.title,
-      description: `₲ ${(l.total_price / 1_000_000).toFixed(1)}M/mes`, link: `/listings/${l.id}` }))
+    .map(l => ({
+      lat: l.latitude,
+      lng: l.longitude,
+      title: l.title,
+      description: `₲ ${(l.total_price / 1_000_000).toFixed(1)}M/mes`,
+      link: `/listings/${l.id}`
+    }))
+
+  // Markers de roomies (map view) con filtros originales
+  const filteredRoomies = roomies.filter(r => {
+    const cityOk = !filters.city || r.profile.city === filters.city
+    const petsOk = !filters.pets_allowed || r.profile.pets
+    const smokingOk = !filters.smoking_allowed || !r.profile.smoker
+    const budgetOk = (!filters.min_price || r.profile.budget_min >= filters.min_price) &&
+                     (!filters.max_price || r.profile.budget_max <= filters.max_price)
+    return cityOk && petsOk && smokingOk && budgetOk
+  }).map(r => ({
+    lat: r.lat,
+    lng: r.lng,
+    profile: r.profile,
+    compatibility: r.compatibility,
+    matches: r.matches,
+    mismatches: r.mismatches
+  }))
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -94,22 +127,20 @@ export default function ListingsPage() {
         </div>
         <div>
           <label className="block text-xs font-semibold text-[#64748B] mb-1 uppercase tracking-wide">Precio min (₲)</label>
-          <input className="input w-36 h-11 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-            type="number" inputMode="numeric" pattern="[0-9]*" min="0" step="1"
+          <input type="number" className="input w-36 h-11"
             value={filters.min_price} placeholder="0"
             onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); setFilters(f => ({ ...f, min_price: v })) }} />
         </div>
         <div>
           <label className="block text-xs font-semibold text-[#64748B] mb-1 uppercase tracking-wide">Precio max (₲)</label>
-          <input className="input w-36 h-11 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-            type="number" inputMode="numeric" pattern="[0-9]*" min="0" step="1"
+          <input type="number" className="input w-36 h-11"
             value={filters.max_price} placeholder="Sin límite"
             onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); setFilters(f => ({ ...f, max_price: v })) }} />
         </div>
         <div className="flex gap-2">
           {[['pets_allowed', '🐾 Mascotas'], ['smoking_allowed', '🚬 Fumadores']].map(([key, label]) => (
             <button key={key} type="button"
-              onClick={() => setFilters(f => ({ ...f, [key]: f[key] === 'true' ? '' : 'true' }))}
+              onClick={() => setFilters(f => ({ ...f, [key]: f[key] === 'true' ? '' : 'true' })) }
               className={`px-3 py-2 rounded-xl border-2 text-sm font-semibold transition-all ${filters[key] === 'true' ? 'border-[#2563C8] bg-[#EFF6FF] text-[#2563C8]' : 'border-[#E2E8F0] text-[#64748B] hover:border-[#BFDBFE]'}`}>
               {label}
             </button>
@@ -123,7 +154,7 @@ export default function ListingsPage() {
       ) : view === 'map' ? (
         <div className="h-[600px]">
           {JaikoMap ? (
-            <JaikoMap markers={mapMarkers} height="600px" />
+            <JaikoMap markers={filteredRoomies} height="600px" />
           ) : (
             <div className="flex justify-center items-center h-full"><Spinner /></div>
           )}

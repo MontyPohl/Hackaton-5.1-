@@ -24,4 +24,34 @@ api.interceptors.response.use(
   }
 )
 
+/**
+ * Trae todos los roomies para mostrar en el mapa.
+ * Cada roomie debe incluir:
+ *   - lat, lng
+ *   - profile: objeto completo del usuario
+ *   - compatibility: número (0-100)
+ *   - matches: array de strings
+ *   - mismatches: array de strings
+ */
+export async function getRoomies() {
+  try {
+    const response = await api.get('/roomies') // Ajusta la ruta según tu backend
+    const data = response.data
+
+    // Mapear al formato que JaikoMap y ProfileCard esperan
+    return data.map((r) => ({
+      id: r.user_id,
+      lat: r.lat,
+      lng: r.lng,
+      profile: r,
+      compatibility: r.compatibility,
+      matches: r.matches || [],
+      mismatches: r.mismatches || [],
+    }))
+  } catch (error) {
+    console.error('Error al traer roomies:', error)
+    return []
+  }
+}
+
 export default api
