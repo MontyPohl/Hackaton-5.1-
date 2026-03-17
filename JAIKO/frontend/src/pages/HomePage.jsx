@@ -71,7 +71,7 @@ const HomePage = () => {
             className={`absolute inset-0 w-full h-full transition-opacity duration-1000 ease-in-out
               ${current === index ? "opacity-100 z-10" : "opacity-0 z-0 pointer-events-none"}`}
           >
-            <div className="relative w-full h-full pt-[40px] flex items-center justify-center overflow-hidden bg-gray-50 z-0">
+            <div className="relative w-full h-full pt-[0px] flex items-center justify-center overflow-hidden bg-gray-50 z-0">
               <img
                 src={slide.image}
                 alt={`Slide ${index + 1}`}
@@ -80,7 +80,7 @@ const HomePage = () => {
             </div>
 
             {/* Div azul */}
-            <div className="absolute bottom-[-1vh] left-0 w-full h-[17vh] flex flex-col items-center justify-center z-30 backdrop-blur-md border-t border-white/20 shadow-2xl bg-transparent">
+            <div className="absolute bottom-[-1vh] left-0 w-full h-[20vh] flex flex-col items-center justify-center z-30 backdrop-blur-md border-t border-white/20 shadow-2xl bg-transparent">
               <Link
                 to="/login"
                 className="relative z-1 px-4 py-2 text-xl font-black text-white rounded-2xl transition-all duration-300 ease-out
