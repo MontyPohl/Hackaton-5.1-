@@ -60,17 +60,17 @@ export default function ListingsPage() {
       <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
         <div>
           <h1 className="font-display font-extrabold text-3xl">Departamentos</h1>
-          <p className="text-orange-400 text-sm mt-1">{listings.length} publicaciones disponibles</p>
+          <p className="text-[#F5A623] text-sm mt-1">{listings.length} publicaciones disponibles</p>
         </div>
         <div className="flex items-center gap-3">
           {/* View toggle */}
-          <div className="flex rounded-xl border border-orange-200 overflow-hidden">
+          <div className="flex rounded-xl border border-[#E2E8F0] overflow-hidden">
             <button onClick={() => setView('grid')}
-              className={`px-3 py-2 flex items-center gap-1.5 text-sm font-semibold transition-colors ${view === 'grid' ? 'bg-primary-500 text-white' : 'text-orange-400 hover:bg-orange-50'}`}>
+              className={`px-3 py-2 flex items-center gap-1.5 text-sm font-semibold transition-colors ${view === 'grid' ? 'bg-[#2563C8] text-white' : 'text-[#64748B] hover:bg-[#F4F7FF]'}`}>
               <LayoutGrid size={15} /> Grid
             </button>
             <button onClick={() => setView('map')}
-              className={`px-3 py-2 flex items-center gap-1.5 text-sm font-semibold transition-colors ${view === 'map' ? 'bg-primary-500 text-white' : 'text-orange-400 hover:bg-orange-50'}`}>
+              className={`px-3 py-2 flex items-center gap-1.5 text-sm font-semibold transition-colors ${view === 'map' ? 'bg-[#2563C8] text-white' : 'text-[#64748B] hover:bg-[#F4F7FF]'}`}>
               <Map size={15} /> Mapa
             </button>
           </div>
@@ -85,27 +85,31 @@ export default function ListingsPage() {
       {/* Filters */}
       <div className="card mb-6 flex flex-wrap gap-4 items-end">
         <div>
-          <label className="block text-xs font-semibold text-orange-400 mb-1 uppercase tracking-wide">Ciudad</label>
+          <label className="block text-xs font-semibold text-[#64748B] mb-1 uppercase tracking-wide">Ciudad</label>
           <select className="input w-44" value={filters.city}
             onChange={e => setFilters(f => ({ ...f, city: e.target.value }))}>
             {CITIES.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
         <div>
-          <label className="block text-xs font-semibold text-orange-400 mb-1 uppercase tracking-wide">Precio min (₲)</label>
-          <input className="input w-36" type="number" value={filters.min_price} placeholder="0"
-            onChange={e => setFilters(f => ({ ...f, min_price: e.target.value }))} />
+          <label className="block text-xs font-semibold text-[#64748B] mb-1 uppercase tracking-wide">Precio min (₲)</label>
+          <input className="input w-36 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            type="number" inputMode="numeric" pattern="[0-9]*" min="0" step="1"
+            value={filters.min_price} placeholder="0"
+            onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); setFilters(f => ({ ...f, min_price: v })) }} />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-orange-400 mb-1 uppercase tracking-wide">Precio max (₲)</label>
-          <input className="input w-36" type="number" value={filters.max_price} placeholder="Sin límite"
-            onChange={e => setFilters(f => ({ ...f, max_price: e.target.value }))} />
+          <label className="block text-xs font-semibold text-[#64748B] mb-1 uppercase tracking-wide">Precio max (₲)</label>
+          <input className="input w-36 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            type="number" inputMode="numeric" pattern="[0-9]*" min="0" step="1"
+            value={filters.max_price} placeholder="Sin límite"
+            onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); setFilters(f => ({ ...f, max_price: v })) }} />
         </div>
         <div className="flex gap-2">
           {[['pets_allowed', '🐾 Mascotas'], ['smoking_allowed', '🚬 Fumadores']].map(([key, label]) => (
             <button key={key} type="button"
               onClick={() => setFilters(f => ({ ...f, [key]: f[key] === 'true' ? '' : 'true' }))}
-              className={`px-3 py-2 rounded-xl border-2 text-sm font-semibold transition-all ${filters[key] === 'true' ? 'border-primary-500 bg-primary-50 text-primary-700' : 'border-orange-200 text-orange-400 hover:border-orange-300'}`}>
+              className={`px-3 py-2 rounded-xl border-2 text-sm font-semibold transition-all ${filters[key] === 'true' ? 'border-[#2563C8] bg-[#EFF6FF] text-[#2563C8]' : 'border-[#E2E8F0] text-[#64748B] hover:border-[#BFDBFE]'}`}>
               {label}
             </button>
           ))}
