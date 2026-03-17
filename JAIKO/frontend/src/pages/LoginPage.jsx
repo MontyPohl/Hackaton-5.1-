@@ -51,15 +51,15 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#F4F7FF] px-4 font-['Nunito']">
+    <div className="min-h-screen flex items-center justify-center bg-[#F4F7FF] px-4 font-sans">
       <div className="w-full max-w-[460px]">
         
         {/* Logo: Jaiko! */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-extrabold text-[#2563C8] font-['Poppins'] tracking-tight">
+          <h1 className="text-4xl font-extrabold text-[#2563C8] tracking-tight">
             Jaik<span className="text-[#F5A623]">o!</span>
           </h1>
-          <p className="text-[#64748B] text-sm mt-1 font-semibold">
+          <p className="text-[#64748B] text-sm font-semibold mt-1">
             Conecta con tu roomie ideal
           </p>
         </div>
@@ -88,7 +88,6 @@ export default function LoginPage() {
                 placeholder="tu@correo.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                /* CAMBIO: Borde 2px y sombra más ancha al hacer focus */
                 className="w-full px-4 py-3.5 border-2 border-[#E2E8F0] rounded-[14px] text-sm outline-none transition-all focus:border-[#F5A623] focus:ring-4 focus:ring-[#F5A623]/20 placeholder:text-gray-400"
               />
             </div>
@@ -102,7 +101,6 @@ export default function LoginPage() {
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                /* CAMBIO: Borde 2px y sombra más ancha al hacer focus */
                 className="w-full px-4 py-3.5 border-2 border-[#E2E8F0] rounded-[14px] text-sm outline-none transition-all focus:border-[#F5A623] focus:ring-4 focus:ring-[#F5A623]/20 placeholder:text-gray-400"
               />
             </div>
