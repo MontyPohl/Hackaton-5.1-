@@ -115,21 +115,29 @@ def join_group(group_id):
 @jwt_required()
 def request_join_group(group_id):
     """
-    Nueva ruta para manejar solicitudes de ingreso al grupo.
-    Crea un registro pendiente y notifica a todos los miembros activos.
+    Ruta corregida para manejar solicitudes de ingreso al grupo.
+    Crea un registro pendiente incluso si el usuario se había ido antes.
     """
     user_id = int(get_jwt_identity())
     group = Group.query.get_or_404(group_id)
 
-    # Verificar si ya hay un miembro o solicitud existente
+    # Verificar si ya hay un miembro activo o solicitud pendiente
     existing = GroupMember.query.filter_by(group_id=group_id, user_id=user_id).first()
-    if existing:
+    if existing and existing.status in ["active", "pending"]:
         return jsonify({"error": "Ya eres miembro o ya enviaste una solicitud"}), 400
 
-    # Crear solicitud pendiente
-    member = GroupMember(group_id=group_id, user_id=user_id, status="pending")
-    db.session.add(member)
-    db.session.commit()
+    try:
+        if existing:
+            existing.status = "pending"  # usuario estaba "left"
+            member = existing
+        else:
+            member = GroupMember(group_id=group_id, user_id=user_id, status="pending")
+            db.session.add(member)
+
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"No se pudo guardar la solicitud: {str(e)}"}), 500
 
     # Enviar notificación a todos los miembros activos
     active_members = GroupMember.query.filter_by(group_id=group_id, status="active").all()
@@ -142,7 +150,7 @@ def request_join_group(group_id):
             data={"group_id": group_id, "request_user_id": user_id},
         )
 
-    return jsonify({"message": "Solicitud enviada"}), 200
+    return jsonify({"message": "Solicitud enviada", "member": {"id": member.id, "status": member.status}}), 200
 
 
 @group_bp.route("/<int:group_id>/leave", methods=["POST"])

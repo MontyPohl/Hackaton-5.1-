@@ -1,8 +1,10 @@
 # notification_routes.py
+
 from flask import Blueprint, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from ..extensions import db
 from ..models import Notification
+from ..services.notification_service import send_notification  # Importamos la función modificada
 
 notification_bp = Blueprint("notifications", __name__)
 
@@ -40,3 +42,21 @@ def mark_all_read():
     Notification.query.filter_by(user_id=user_id, read=False).update({"read": True})
     db.session.commit()
     return jsonify({"message": "All marked as read"}), 200
+
+
+# NUEVO: ruta de ejemplo para enviar una notificación manual (opcional)
+@notification_bp.route("/send-test", methods=["POST"])
+@jwt_required()
+def send_test_notification():
+    """
+    Esta ruta es opcional para probar que send_notification guarda la notificación en la DB.
+    """
+    user_id = int(get_jwt_identity())
+    send_notification(
+        user_id=user_id,
+        type="system",
+        title="Prueba de notificación",
+        content="Esta es una notificación de prueba",
+        data={"example": True},
+    )
+    return jsonify({"message": "Notificación de prueba enviada"}), 200
