@@ -18,10 +18,14 @@ def create_app(env: str = None) -> Flask:
         resources={r"/api/*": {"origins": app.config["FRONTEND_URL"]}},
         supports_credentials=True,
     )
+
+    # threading es el modo correcto para Windows. eventlet con monkey_patch
+    # causa que los emit() a rooms de otros clientes fallen silenciosamente
+    # en Windows. Sin monkey_patch, threading maneja la concurrencia bien.
     socketio.init_app(
         app,
         cors_allowed_origins=app.config["FRONTEND_URL"],
-        async_mode="threading",
+        async_mode="threading",  # <-- threading funciona en Windows sin monkey_patch
         logger=False,
         engineio_logger=False,
     )

@@ -106,15 +106,15 @@ def on_send_message(data):
 
     msg_dict = msg.to_dict()
 
-    # Broadcast to chat room (members who already joined the room)
+    # Use socketio.emit (not the handler-scoped emit) to reliably broadcast
+    # to rooms that may belong to other socket connections
     room = f"chat_{chat_id}"
-    emit("receive_message", msg_dict, room=room)
+    socketio.emit("receive_message", msg_dict, room=room, namespace="/")
 
-    # Also deliver directly to each member's personal room so the message
-    # arrives even if the recipient hasn't emitted join_chat yet
+    # Also deliver to each member's personal room (works even without join_chat)
     for cm in chat.members:
         if cm.user_id != user_id:
-            emit("receive_message", msg_dict, room=f"user_{cm.user_id}")
+            socketio.emit("receive_message", msg_dict, room=f"user_{cm.user_id}", namespace="/")
 
     # Send push notification to offline members
     sender_profile = msg.sender.profile
