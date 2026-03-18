@@ -5,14 +5,14 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
-// Attach JWT from localStorage automatically
+// Adjuntar JWT automáticamente
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('jaiko_token')
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
 
-// Handle 401 globally
+// Manejar 401 globalmente
 api.interceptors.response.use(
   (res) => res,
   (err) => {
@@ -25,21 +25,15 @@ api.interceptors.response.use(
 )
 
 /**
- * Trae todos los roomies para mostrar en el mapa.
- * Cada roomie debe incluir:
- *   - lat, lng
- *   - profile: objeto completo del usuario
- *   - compatibility: número (0-100)
- *   - matches: array de strings
- *   - mismatches: array de strings
+ * Trae roomies compatibles usando el endpoint de búsqueda real.
+ * FIX: antes llamaba a /api/roomies que no existe.
  */
-export async function getRoomies() {
+export async function getRoomies(city = 'Asunción') {
   try {
-    const response = await api.get('/roomies') // Ajusta la ruta según tu backend
-    const data = response.data
-
-    // Mapear al formato que JaikoMap y ProfileCard esperan
-    return data.map((r) => ({
+    const response = await api.get('/profiles/search', {
+      params: { city, per_page: 100, page: 1 },
+    })
+    return (response.data.profiles || []).map((r) => ({
       id: r.user_id,
       lat: r.lat,
       lng: r.lng,
@@ -55,8 +49,7 @@ export async function getRoomies() {
 }
 
 /**
- * Actualiza el perfil del usuario autenticado
- * data debe incluir los campos del formulario, incluyendo city/ubicación
+ * Actualiza el perfil del usuario autenticado.
  */
 export async function updateProfile(data) {
   try {

@@ -4,10 +4,10 @@ from ..extensions import db
 from ..models import RoommateRequest, User
 from ..services.notification_service import send_notification
 
-# ── Definición del blueprint ───────────────────────────────
 request_bp = Blueprint("requests", __name__)
 
-# ── CREAR NUEVA SOLICITUD ─────────────────────────────────
+
+# ── CREAR NUEVA SOLICITUD ─────────────────────────────────────────────────────
 @request_bp.route("/", methods=["POST"])
 @jwt_required()
 def create_request():
@@ -20,9 +20,13 @@ def create_request():
     listing_id = data.get("listing_id")
 
     if not target and not group_id and not listing_id:
-        return jsonify({"error": "target_user_id, group_id, or listing_id required"}), 400
+        return jsonify({"error": "target_user_id, group_id, o listing_id requerido"}), 400
 
-    # Verificar si ya existe una solicitud pendiente similar
+    # FIX: no permitir solicitud a uno mismo
+    if target and target == user_id:
+        return jsonify({"error": "No podés enviarte una solicitud a vos mismo"}), 400
+
+    # Verificar solicitud duplicada pendiente
     existing = RoommateRequest.query.filter_by(
         sender_user_id=user_id,
         target_user_id=target,
@@ -31,9 +35,8 @@ def create_request():
         status="pending",
     ).first()
     if existing:
-        return jsonify({"error": "Request already pending"}), 409
+        return jsonify({"error": "Ya tenés una solicitud pendiente con este usuario"}), 409
 
-    # Crear la solicitud
     req = RoommateRequest(
         sender_user_id=user_id,
         target_user_id=target,
@@ -45,20 +48,21 @@ def create_request():
     db.session.add(req)
     db.session.flush()
 
-    # Notificar al destinatario si aplica
+    # Notificar al destinatario
     if target:
         send_notification(
             user_id=target,
             type="match_request",
             title="Nueva solicitud de roomie",
-            content=f"Alguien quiere ser tu roomie",
+            content="Alguien quiere ser tu roomie",
             data={"request_id": req.id, "sender_id": user_id},
         )
 
     db.session.commit()
     return jsonify({"request": req.to_dict()}), 201
 
-# ── RESPONDER A UNA SOLICITUD ─────────────────────────────
+
+# ── RESPONDER A UNA SOLICITUD ─────────────────────────────────────────────────
 @request_bp.route("/<int:req_id>/respond", methods=["PUT"])
 @jwt_required()
 def respond_request(req_id):
@@ -67,51 +71,112 @@ def respond_request(req_id):
     action = data.get("action")
 
     if action not in ["accept", "reject"]:
-        return jsonify({"error": "Action inválida"}), 400
+        return jsonify({"error": "Acción inválida. Usar 'accept' o 'reject'"}), 400
 
-    # Obtener la solicitud
     req = RoommateRequest.query.get_or_404(req_id)
 
-    # Validar que el usuario sea el receptor
+    # Solo el receptor puede responder
     if req.target_user_id != user_id:
         return jsonify({"error": "No autorizado"}), 403
 
-    # Obtener los usuarios a partir de sus IDs
+    # Solo se puede responder a solicitudes pendientes
+    if req.status != "pending":
+        return jsonify({"error": f"Esta solicitud ya fue {req.status}"}), 400
+
     sender = User.query.get(req.sender_user_id)
     receiver = User.query.get(req.target_user_id)
 
-    # Validar que ambos existan y tengan perfil
-    if not sender or not receiver or not sender.profile or not receiver.profile:
-        return jsonify({"error": "Uno de los usuarios no tiene perfil"}), 400
+    if not sender or not receiver:
+        return jsonify({"error": "Usuario no encontrado"}), 404
+    if not sender.profile or not receiver.profile:
+        return jsonify({"error": "Uno de los usuarios no tiene perfil completo"}), 400
 
     if action == "accept":
-        # ── ACEPTAR SOLICITUD ─────────────────────────────
         req.status = "accepted"
 
-        # Guardar relación de roomies
+        # FIX: asignar roomies correctamente (sender ↔ receiver)
         sender.profile.current_roomie_id = receiver.id
         receiver.profile.current_roomie_id = sender.id
 
-        # Cambiar estado de búsqueda de roomie
+        # Ambos dejan de buscar
         sender.profile.is_looking = False
         receiver.profile.is_looking = False
 
         db.session.commit()
 
+        # FIX: notificar al EMISOR que fue aceptado
+        send_notification(
+            user_id=sender.id,
+            type="request_accepted",
+            title="¡Solicitud aceptada!",
+            content=f"{receiver.profile.name} aceptó tu solicitud de roomie",
+            data={
+                "request_id": req.id,
+                "roommate_id": receiver.id,
+                "sender_id": receiver.id,
+            },
+        )
+
+        # FIX: devolver el EMISOR como roommate (no el receiver)
         return jsonify({
             "message": "Solicitud aceptada",
-            "my_profile": sender.profile.to_dict(),
             "roommate": {
-                "id": receiver.id,
-                "name": receiver.profile.name,
-                "profile_photo_url": receiver.profile.profile_photo_url
-            }
+                "id": sender.id,
+                "name": sender.profile.name,
+                "profile_photo_url": sender.profile.profile_photo_url,
+            },
         }), 200
+
     else:
-        # ── RECHAZAR SOLICITUD ─────────────────────────────
         req.status = "rejected"
         db.session.commit()
-        return jsonify({
-            "message": "Solicitud rechazada",
-            "redirect": "/notifications"
-        }), 200
+
+        # FIX: notificar al emisor que fue rechazado
+        send_notification(
+            user_id=sender.id,
+            type="request_rejected",
+            title="Solicitud no aceptada",
+            content=f"{receiver.profile.name} no aceptó tu solicitud",
+            data={"request_id": req.id},
+        )
+
+        return jsonify({"message": "Solicitud rechazada"}), 200
+
+
+# ── LISTAR SOLICITUDES RECIBIDAS PENDIENTES ───────────────────────────────────
+@request_bp.route("/pending", methods=["GET"])
+@jwt_required()
+def get_pending_requests():
+    user_id = int(get_jwt_identity())
+    reqs = RoommateRequest.query.filter_by(
+        target_user_id=user_id, status="pending"
+    ).order_by(RoommateRequest.created_at.desc()).all()
+    return jsonify({"requests": [r.to_dict() for r in reqs]}), 200
+
+
+# ── LISTAR SOLICITUDES ENVIADAS ───────────────────────────────────────────────
+@request_bp.route("/sent", methods=["GET"])
+@jwt_required()
+def get_sent_requests():
+    user_id = int(get_jwt_identity())
+    reqs = RoommateRequest.query.filter_by(
+        sender_user_id=user_id
+    ).order_by(RoommateRequest.created_at.desc()).all()
+    return jsonify({"requests": [r.to_dict() for r in reqs]}), 200
+
+
+# ── CANCELAR SOLICITUD ENVIADA ────────────────────────────────────────────────
+@request_bp.route("/<int:req_id>/cancel", methods=["DELETE"])
+@jwt_required()
+def cancel_request(req_id):
+    user_id = int(get_jwt_identity())
+    req = RoommateRequest.query.get_or_404(req_id)
+
+    if req.sender_user_id != user_id:
+        return jsonify({"error": "No autorizado"}), 403
+    if req.status != "pending":
+        return jsonify({"error": "Solo se pueden cancelar solicitudes pendientes"}), 400
+
+    req.status = "cancelled"
+    db.session.commit()
+    return jsonify({"message": "Solicitud cancelada"}), 200

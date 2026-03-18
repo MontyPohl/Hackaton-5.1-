@@ -1,10 +1,6 @@
-from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
-from ..extensions import db
-from .user import User  
 from datetime import datetime
+from ..extensions import db
 
-profile_bp = Blueprint('profile', __name__, url_prefix='/profiles')
 
 class Profile(db.Model):
     __tablename__ = "profiles"
@@ -23,26 +19,51 @@ class Profile(db.Model):
     schedule = db.Column(db.String(30), nullable=True)
     diseases = db.Column(db.Text, nullable=True)
     profile_photo_url = db.Column(db.String(500), nullable=True)
-    city = db.Column(db.String(100), nullable=True, default="Asunción")
-    lat = db.Column(db.Float, nullable=True)  
-    lng = db.Column(db.Float, nullable=True)  
+    city = db.Column(db.String(100), nullable=True, default="Asunción", index=True)
+    lat = db.Column(db.Float, nullable=True)
+    lng = db.Column(db.Float, nullable=True)
     verified = db.Column(db.Boolean, default=False)
     verification_status = db.Column(db.String(30), default="not_requested")
-    is_looking = db.Column(db.Boolean, default=True)
-    
-    # --- Cambios realizados por Aaron Barrios ---
-    # Columnas para la reciprocidad de edad: qué rango busca este usuario
+    is_looking = db.Column(db.Boolean, default=True, index=True)
+
+    # FIX: columna current_roomie_id agregada (requiere migración SQL)
+    current_roomie_id = db.Column(
+        db.Integer, db.ForeignKey("users.id"), nullable=True
+    )
+
+    # Preferencias de edad (Aaron Barrios)
     pref_min_age = db.Column(db.Integer, nullable=True, default=18)
     pref_max_age = db.Column(db.Integer, nullable=True, default=99)
-    # --------------------------------------------
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
-    # Relationship
-    user = db.relationship("User", back_populates="profile")
+    # Relationships — foreign_keys explícitos porque hay 2 FK hacia users
+    user = db.relationship(
+        "User",
+        back_populates="profile",
+        foreign_keys=[user_id],
+    )
+    current_roomie = db.relationship(
+        "User",
+        foreign_keys=[current_roomie_id],
+    )
 
     def to_dict(self, include_private: bool = False) -> dict:
+        # Resolver current_roomie de forma segura
+        roomie_data = None
+        if self.current_roomie:
+            r = self.current_roomie
+            roomie_data = {
+                "id": r.id,
+                "name": r.profile.name if r.profile else None,
+                "profile_photo_url": (
+                    r.profile.profile_photo_url if r.profile else None
+                ),
+            }
+
         data = {
             "id": self.id,
             "user_id": self.user_id,
@@ -63,50 +84,11 @@ class Profile(db.Model):
             "verified": self.verified,
             "verification_status": self.verification_status,
             "is_looking": self.is_looking,
-            # --- Cambios realizados por Aaron Barrios ---
             "pref_min_age": self.pref_min_age,
             "pref_max_age": self.pref_max_age,
-            # --------------------------------------------
+            "current_roomie": roomie_data,
             "created_at": self.created_at.isoformat(),
         }
         if include_private:
             data["diseases"] = self.diseases
         return data
-
-
-@profile_bp.route('/me', methods=['PUT'])
-@jwt_required()
-def update_profile():
-    user_id = get_jwt_identity()
-    user = User.query.get(user_id)
-    if not user or not user.profile:
-        return jsonify({"error": "Perfil no encontrado"}), 404
-
-    data = request.json
-    profile = user.profile
-
-    # Actualizar campos
-    profile.name = data.get('name', profile.name)
-    profile.age = data.get('age', profile.age)
-    profile.gender = data.get('gender', profile.gender)
-    profile.profession = data.get('profession', profile.profession)
-    profile.bio = data.get('bio', profile.bio)
-    profile.budget_min = data.get('budget_min', profile.budget_min)
-    profile.budget_max = data.get('budget_max', profile.budget_max)
-    profile.pets = data.get('pets', profile.pets)
-    profile.smoker = data.get('smoker', profile.smoker)
-    profile.schedule = data.get('schedule', profile.schedule)
-    profile.city = data.get('city', profile.city)
-    profile.lat = data.get('lat', profile.lat)
-    profile.lng = data.get('lng', profile.lng)
-    profile.is_looking = data.get('is_looking', profile.is_looking)
-
-    # --- Cambios realizados por Aaron Barrios ---
-    # Permitir que el usuario guarde su rango de edad preferido
-    profile.pref_min_age = data.get('pref_min_age', profile.pref_min_age)
-    profile.pref_max_age = data.get('pref_max_age', profile.pref_max_age)
-    # --------------------------------------------
-
-    db.session.commit()
-
-    return jsonify({"profile": profile.to_dict()}), 200

@@ -1,16 +1,15 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from ..extensions import db
-from ..models import User, Profile, RoommateRequest
+from ..models import User, Profile
 from ..services.matching_service import compute_compatibility
-from typing import cast, List
 
 profile_bp = Blueprint("profiles", __name__)
-# Blueprint para gestionar las solicitudes de rumi
-requests_bp = Blueprint("requests", __name__)
 
-# ── PERFIL ───────────────────────────────────────────────
+# FIX: requests_bp eliminado (era código muerto — nunca se registraba en __init__.py)
 
+
+# ── ACTUALIZAR MI PERFIL ──────────────────────────────────────────────────────
 @profile_bp.route("/me", methods=["PUT"])
 @jwt_required()
 def update_my_profile():
@@ -18,21 +17,20 @@ def update_my_profile():
     user = User.query.get_or_404(user_id)
     profile = user.profile
     if not profile:
-        profile = Profile(user_id=user_id)
+        profile = Profile(user_id=user_id, name="Nuevo Usuario")
         db.session.add(profile)
 
     data = request.get_json()
-    
-    # --- Cambios realizados por Aaron Barrios ---
-    # Agrego las preferencias de edad a los campos permitidos para guardar en el perfil
+
+    # FIX: lat y lng agregados a la lista de campos permitidos
     allowed = [
         "name", "age", "gender", "profession", "bio",
         "budget_min", "budget_max", "pets", "smoker",
         "schedule", "diseases", "city", "is_looking",
-        "pref_min_age", "pref_max_age", # Columnas para la reciprocidad
+        "lat", "lng",
+        "pref_min_age", "pref_max_age",
     ]
-    # --------------------------------------------
-    
+
     for field in allowed:
         if field in data:
             setattr(profile, field, data[field])
@@ -41,19 +39,21 @@ def update_my_profile():
     return jsonify({"profile": profile.to_dict(include_private=True)}), 200
 
 
+# ── VER PERFIL DE OTRO USUARIO ────────────────────────────────────────────────
 @profile_bp.route("/<int:user_id>", methods=["GET"])
 @jwt_required()
 def get_profile(user_id):
     user = User.query.get_or_404(user_id)
     if user.is_blocked():
-        return jsonify({"error": "User not available"}), 404
+        return jsonify({"error": "Usuario no disponible"}), 404
     return jsonify({"profile": user.profile.to_dict() if user.profile else None}), 200
 
 
+# ── BUSCAR PERFILES COMPATIBLES ───────────────────────────────────────────────
 @profile_bp.route("/search", methods=["GET"])
 @jwt_required()
 def search_profiles():
-    """Return profiles with >= 80% compatibility and reciprocal age filtering."""
+    """Devuelve perfiles con >= 80% de compatibilidad y filtrado recíproco de edad."""
     current_user_id = int(get_jwt_identity())
     current_user = User.query.get_or_404(current_user_id)
     my_profile = current_user.profile
@@ -62,13 +62,16 @@ def search_profiles():
     page = int(request.args.get("page", 1))
     per_page = int(request.args.get("per_page", 20))
 
-    # --- Cambios realizados por Aaron Barrios ---
-    # Capturo los parámetros de edad enviados desde SearchPage.jsx
+    # Parámetros de filtrado
     min_age = request.args.get("min_age", type=int)
     max_age = request.args.get("max_age", type=int)
-    # --------------------------------------------
 
-    # Definimos la base de la consulta
+    # FIX: filtros pets/smoker/schedule ahora se leen y aplican
+    pets_filter = request.args.get("pets")       # "true" | "false" | None
+    smoker_filter = request.args.get("smoker")   # "true" | "false" | None
+    schedule_filter = request.args.get("schedule")  # string | None
+
+    # Query base
     query = (
         Profile.query
         .join(User)
@@ -80,28 +83,33 @@ def search_profiles():
         )
     )
 
-    # --- Cambios realizados por Aaron Barrios ---
-    # 1. Filtro de Salida: El roomie debe estar en el rango que YO busco
+    # Filtro de edad de salida (el roomie debe estar en el rango que busco)
     if min_age:
         query = query.filter(Profile.age >= min_age)
     if max_age:
         query = query.filter(Profile.age <= max_age)
 
-    # 2. Filtro de Entrada (Reciprocidad): 
-    # Solo me salen personas que aceptarían mi edad actual (31 años)
+    # Filtro de edad de entrada — reciprocidad
     if my_profile and my_profile.age:
         query = query.filter(
             Profile.pref_min_age <= my_profile.age,
-            Profile.pref_max_age >= my_profile.age
+            Profile.pref_max_age >= my_profile.age,
         )
-    # --------------------------------------------
 
-    # Aplicamos paginación al final de todos los filtros
-    query = query.offset((page - 1) * per_page).limit(per_page)
-    profiles = query.all()
+    # FIX: aplicar filtros pets / smoker / schedule en SQL
+    if pets_filter is not None and pets_filter != "":
+        query = query.filter(Profile.pets == (pets_filter == "true"))
+    if smoker_filter is not None and smoker_filter != "":
+        query = query.filter(Profile.smoker == (smoker_filter == "true"))
+    if schedule_filter:
+        query = query.filter(Profile.schedule == schedule_filter)
+
+    # FIX: traer todos los candidatos ANTES de filtrar por compatibilidad
+    # (antes se paginaba primero y luego se filtraba, lo que causaba 0 resultados)
+    all_profiles = query.all()
 
     results = []
-    for p in profiles:
+    for p in all_profiles:
         score, matches, mismatches = compute_compatibility(my_profile, p)
         if score >= 0.80:
             d = p.to_dict()
@@ -111,4 +119,15 @@ def search_profiles():
             results.append(d)
 
     results.sort(key=lambda x: x["compatibility"], reverse=True)
-    return jsonify({"profiles": results, "page": page}), 200
+
+    # Paginar sobre los resultados ya filtrados
+    total = len(results)
+    paged = results[(page - 1) * per_page: page * per_page]
+    has_more = (page * per_page) < total
+
+    return jsonify({
+        "profiles": paged,
+        "page": page,
+        "total": total,
+        "has_more": has_more,
+    }), 200
