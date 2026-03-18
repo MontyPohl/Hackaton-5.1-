@@ -98,15 +98,17 @@ export default function ChatPage() {
     }
   }
 
+  // CORREGIDO: funciones para mostrar nombre y foto correctamente
   const getChatName = (chat) => {
     if (chat.type === 'group') return `Grupo #${chat.group_id}`
     const other = chat.members?.find(m => m.user_id !== user?.id)
-    return other?.name || 'Chat'
+    // Si no tiene name, mostrar "Usuario #ID"
+    return other?.name ?? `Usuario #${other?.user_id}`
   }
 
   const getChatPhoto = (chat) => {
     const other = chat.members?.find(m => m.user_id !== user?.id)
-    return other?.photo || null
+    return other?.photo ?? null
   }
 
   return (
