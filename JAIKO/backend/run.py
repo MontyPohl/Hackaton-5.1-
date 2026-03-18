@@ -1,5 +1,7 @@
-import eventlet
-eventlet.monkey_patch()
+# NO se usa eventlet.monkey_patch() porque en Windows causa que los
+# socketio.emit() a rooms de otros clientes fallen silenciosamente.
+# Flask-SocketIO con async_mode="threading" maneja la concurrencia
+# correctamente sin necesidad de monkey patching.
 
 from app import create_app
 from app.extensions import socketio
@@ -12,9 +14,6 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=5000,
         debug=True,
-        use_reloader=False,      # <-- CRÍTICO: el werkzeug reloader crea un
-                                 # proceso hijo donde eventlet.monkey_patch()
-                                 # no funciona, rompiendo los emit() a otros
-                                 # clientes. Sin reloader, eventlet funciona ok.
+        use_reloader=False,      # Reloader crea proceso hijo que rompe los sockets
         allow_unsafe_werkzeug=True
     )
