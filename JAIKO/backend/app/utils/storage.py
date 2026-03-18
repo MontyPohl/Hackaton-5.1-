@@ -20,10 +20,20 @@ PUBLIC_BUCKETS  = {"profiles", "listings", "groups"}
 PRIVATE_BUCKETS = {"verifications"}
 
 
-def _get_client() -> Client:
+def _get_client(private: bool = False) -> Client:
+    global _client
+    url = os.environ.get("SUPABASE_URL")
+    
+    if private:
+        # Service role key para buckets privados
+        key = os.environ.get("SUPABASE_SERVICE_KEY")
+        if not key:
+            raise RuntimeError("SUPABASE_SERVICE_KEY must be set for private buckets")
+        return create_client(url, key)
+    
+    # Anon key para buckets públicos
     global _client
     if _client is None:
-        url = os.environ.get("SUPABASE_URL")
         key = os.environ.get("SUPABASE_KEY")
         if not url or not key:
             raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be set")
@@ -43,7 +53,7 @@ def upload_image(file_bytes: bytes, filename: str, bucket: str) -> str:
     Returns:
         URL pública (buckets públicos) o path relativo (bucket privado)
     """
-    client = _get_client()
+    client = _get_client(private=bucket in PRIVATE_BUCKETS)
 
     client.storage.from_(bucket).upload(
         filename,
@@ -72,14 +82,14 @@ def get_signed_url(bucket: str, path: str, expires_in: int = 3600) -> str:
     Returns:
         URL firmada con tiempo de expiración
     """
-    client = _get_client()
+    client = _get_client(private=True)
     result = client.storage.from_(bucket).create_signed_url(path, expires_in)
     return result.get("signedURL") or result.get("signed_url") or ""
 
 
 def delete_image(bucket: str, path: str) -> None:
     """Elimina un archivo del bucket indicado."""
-    client = _get_client()
+    client = _get_client(private=bucket in PRIVATE_BUCKETS)
     client.storage.from_(bucket).remove([path])
 
 
