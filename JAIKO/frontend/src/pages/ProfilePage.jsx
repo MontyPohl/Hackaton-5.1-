@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { Edit2, MessageCircle, UserPlus, Flag, MapPin, Briefcase, Calendar } from 'lucide-react'
+import { Edit2, MessageCircle, UserPlus, Flag, MapPin, Briefcase, Calendar, ShieldCheck } from 'lucide-react'
 import api from '../services/api'
 import useAuthStore from '../context/authStore'
 import { Avatar, Badge, StarRating, Modal, Spinner, EmptyState } from '../components/ui'
@@ -22,76 +22,62 @@ export default function ProfilePage() {
   const [reportDesc, setReportDesc] = useState('')
   const [pendingRequest, setPendingRequest] = useState(null)
   const [verification, setVerification] = useState(null)
-  const [verifying, setVerifying] = useState(false)
   const [roommate, setRoommate] = useState(null)
 
-  // ── Cargar perfil, reseñas y estado de verificación ──────────────────────
   useEffect(() => {
     setLoading(true)
-    
+
     if (!isMe && targetId) {
-      // Perfil de otro usuario
       api.get(`/profiles/${targetId}`)
         .then(({ data }) => {
           setProfile(data.profile)
           setRoommate(data.profile.current_roomie)
           setLoading(false)
         })
-        .catch(() => { 
+        .catch(() => {
           toast.error('Perfil no encontrado')
-          navigate('/') 
+          navigate('/')
         })
 
-      // Verificar si hay una notificación pendiente para este perfil
       const storedRequest = JSON.parse(localStorage.getItem('lastRequestNotification'))
       if (storedRequest?.sender_id === targetId) {
         setPendingRequest({ id: storedRequest.request_id })
         localStorage.removeItem('lastRequestNotification')
       }
     } else {
-      // Mi propio perfil
       setProfile(myProfile)
       setRoommate(myProfile?.current_roomie)
       setLoading(false)
-      
+
       api.get('/verification/me')
         .then(({ data }) => setVerification(data.verification))
         .catch(() => setVerification(null))
     }
 
-    // Cargar reseñas (común para ambos)
     api.get(`/reviews/user/${targetId}`)
       .then(({ data }) => setReviews(data.reviews))
       .catch(() => {})
 
   }, [targetId, isMe, myProfile, navigate])
 
-  // ── Función para aceptar/rechazar solicitud ─────────────────────────────
   const respondRequest = async (reqId, action) => {
     try {
       const { data } = await api.put(`/requests/${reqId}/respond`, { action })
-
       if (action === 'accept') {
         toast.success('¡Solicitud aceptada! Ahora son roommates.')
-        
-        // Actualizamos el rumi localmente
         setRoommate(data.roommate)
-        
-        // Si el perfil que estoy viendo es el mío, actualizo el store global
         if (isMe) {
           setMyProfile({ ...myProfile, current_roomie: data.roommate, is_looking: false })
         }
       } else {
         toast.success('Solicitud rechazada')
       }
-
       setPendingRequest(null)
     } catch (e) {
       toast.error(e.response?.data?.error || 'Error al procesar solicitud')
     }
   }
 
-  // ── Función para enviar solicitud de roomie ─────────────────────────────
   const handleSendRequest = async () => {
     try {
       await api.post('/requests/', { target_user_id: targetId, type: 'roommate' })
@@ -101,7 +87,6 @@ export default function ProfilePage() {
     }
   }
 
-  // ── Función para abrir chat ─────────────────────────────────────────────
   const handleOpenChat = async () => {
     try {
       const { data } = await api.post(`/chats/private/${targetId}`)
@@ -111,7 +96,6 @@ export default function ProfilePage() {
     }
   }
 
-  // ── Función para reportar usuario ───────────────────────────────────────
   const handleReport = async () => {
     try {
       await api.post('/reports/', { reported_user_id: targetId, reason: reportReason, description: reportDesc })
@@ -122,18 +106,13 @@ export default function ProfilePage() {
     }
   }
 
-  // ── Función para solicitar verificación ────────────────────────────────
-  const handleRequestVerification = async () => {
-    setVerifying(true)
-    try {
-      const { data } = await api.post('/verification/request')
-      setVerification(data.verification)
-      toast.success('Solicitud de verificación enviada')
-    } catch (e) {
-      toast.error(e.response?.data?.error || 'Error al solicitar verificación')
-    } finally {
-      setVerifying(false)
-    }
+  // ── Etiqueta del botón según estado de verificación ──────────────────────
+  const getVerificationLabel = () => {
+    if (!verification || verification.status === 'not_requested') return 'Verificar perfil'
+    if (verification.status === 'pending_verification' && !verification.selfie_url) return 'Subir selfie →'
+    if (verification.status === 'pending_verification' && verification.selfie_url) return 'Verificación pendiente'
+    if (verification.status === 'rejected') return 'Reintentar verificación'
+    return 'Verificar perfil'
   }
 
   if (loading) return <div className="flex justify-center py-20"><Spinner size="lg" /></div>
@@ -153,16 +132,18 @@ export default function ProfilePage() {
                   <h1 className="font-display font-extrabold text-2xl">{profile.name}</h1>
 
                   {profile.verified && <Badge variant="green">✓ Verificado</Badge>}
-                  
-                  {isMe && !profile.verified && (
+
+                  {/* ── BOTÓN VERIFICACIÓN — ahora redirige a /verification ── */}
+                  {isMe && !profile.verified && verification?.status !== 'verified' && (
                     <button
-                      onClick={handleRequestVerification}
-                      disabled={verifying || (verification && verification.status === 'pending_verification')}
-                      className="btn-secondary text-sm py-1.5 px-3"
+                      onClick={() => navigate('/verification')}
+                      className="btn-secondary text-sm py-1.5 px-3 flex items-center gap-1.5"
                     >
-                      {verification?.status === 'pending_verification' ? 'Verificación pendiente...' : 'Verificar perfil'}
+                      <ShieldCheck size={14} />
+                      {getVerificationLabel()}
                     </button>
                   )}
+
                   {profile.is_looking && !roommate && <Badge variant="orange">Buscando</Badge>}
                 </div>
 
@@ -172,7 +153,6 @@ export default function ProfilePage() {
                   {profile.city && <span><MapPin size={13} className="inline" /> {profile.city}</span>}
                 </div>
 
-                {/* MODIFICACIÓN AQUÍ: Mostrar roomie dinámicamente */}
                 {roommate && (
                   <div className="mt-2 text-sm text-emerald-600 font-bold bg-emerald-50 px-3 py-1 rounded-lg inline-block">
                     🏠 {isMe ? `Soy roomie de ${roommate.name}` : `Es roomie de ${roommate.name}`}
@@ -206,22 +186,15 @@ export default function ProfilePage() {
 
             {profile.bio && <p className="text-gray-600 mt-3 text-sm leading-relaxed">{profile.bio}</p>}
 
-            {/* BOTONES DE ACEPTAR/RECHAZAR SOLICITUD */}
             {!isMe && pendingRequest && !roommate && (
               <div className="flex gap-2 mt-4 p-4 bg-orange-50 rounded-2xl border border-orange-100">
                 <div className="flex-1">
                   <p className="text-sm font-bold text-orange-800 mb-2">¡Te ha enviado una solicitud de roomie!</p>
                   <div className="flex gap-2">
-                    <button
-                      onClick={() => respondRequest(pendingRequest.id, 'accept')}
-                      className="btn-primary text-xs py-2 px-4"
-                    >
+                    <button onClick={() => respondRequest(pendingRequest.id, 'accept')} className="btn-primary text-xs py-2 px-4">
                       Aceptar
                     </button>
-                    <button
-                      onClick={() => respondRequest(pendingRequest.id, 'reject')}
-                      className="btn-secondary text-xs py-2 px-4"
-                    >
+                    <button onClick={() => respondRequest(pendingRequest.id, 'reject')} className="btn-secondary text-xs py-2 px-4">
                       Rechazar
                     </button>
                   </div>
@@ -232,7 +205,7 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* Preferences and Reviews */}
+      {/* Preferencias y Reseñas */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
         <div className="card">
           <h2 className="font-display font-bold text-lg mb-4">Preferencias de convivencia</h2>
