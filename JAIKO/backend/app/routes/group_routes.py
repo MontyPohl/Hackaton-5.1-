@@ -6,7 +6,7 @@ from ..services.notification_service import send_notification
 
 group_bp = Blueprint("groups", __name__)
 
-
+# --- Listar grupos ---
 @group_bp.route("/", methods=["GET"])
 @jwt_required()
 def list_groups():
@@ -24,7 +24,7 @@ def list_groups():
     )
     return jsonify({"groups": [g.to_dict() for g in groups], "total": total, "page": page}), 200
 
-
+# --- Crear grupo ---
 @group_bp.route("/", methods=["POST"])
 @jwt_required()
 def create_group():
@@ -34,7 +34,6 @@ def create_group():
     if not data.get("name"):
         return jsonify({"error": "El nombre del grupo es requerido"}), 400
 
-    # FIX: limitar max_members entre 2 y 6
     max_members = max(2, min(int(data.get("max_members", 3)), 6))
 
     group = Group(
@@ -63,14 +62,28 @@ def create_group():
     db.session.commit()
     return jsonify({"group": group.to_dict()}), 201
 
-
+# --- Obtener grupo ---
 @group_bp.route("/<int:group_id>", methods=["GET"])
 @jwt_required()
 def get_group(group_id):
     group = Group.query.get_or_404(group_id)
-    return jsonify({"group": group.to_dict()}), 200
+    group_data = group.to_dict()
 
+    # Incluir solicitudes pendientes
+    pending_members = GroupMember.query.filter_by(group_id=group_id, status="pending").all()
+    group_data["join_requests"] = [
+        {
+            "id": m.id,
+            "user": {
+                "id": m.user_id,
+                "profile": m.user.profile.to_dict() if m.user and m.user.profile else {}
+            }
+        }
+        for m in pending_members
+    ]
+    return jsonify({"group": group_data}), 200
 
+# --- Unirse directamente al grupo ---
 @group_bp.route("/<int:group_id>/join", methods=["POST"])
 @jwt_required()
 def join_group(group_id):
@@ -93,8 +106,7 @@ def join_group(group_id):
     # Agregar al chat del grupo
     chat = Chat.query.filter_by(group_id=group_id).first()
     if chat:
-        cm = ChatMember.query.filter_by(chat_id=chat.id, user_id=user_id).first()
-        if not cm:
+        if not ChatMember.query.filter_by(chat_id=chat.id, user_id=user_id).first():
             db.session.add(ChatMember(chat_id=chat.id, user_id=user_id))
 
     if group.current_members + 1 >= group.max_members:
@@ -111,7 +123,7 @@ def join_group(group_id):
     )
     return jsonify({"message": "Te uniste al grupo", "group": group.to_dict()}), 200
 
-
+# --- Solicitud de unirse al grupo ---
 @group_bp.route("/<int:group_id>/join-request", methods=["POST"])
 @jwt_required()
 def request_join_group(group_id):
@@ -147,7 +159,61 @@ def request_join_group(group_id):
 
     return jsonify({"message": "Solicitud enviada", "member": {"id": member.id, "status": member.status}}), 200
 
+# --- Aceptar solicitud ---
+@group_bp.route("/<int:group_id>/join-request/<int:request_id>/accept", methods=["POST"])
+@jwt_required()
+def accept_join_request(group_id, request_id):
+    user_id = int(get_jwt_identity())
+    admin = GroupMember.query.filter_by(group_id=group_id, user_id=user_id, role="admin", status="active").first()
+    if not admin:
+        return jsonify({"error": "Solo un admin puede aceptar solicitudes"}), 403
 
+    request_member = GroupMember.query.get_or_404(request_id)
+    request_member.status = "active"
+
+    group = Group.query.get(group_id)
+    if group.current_members + 1 >= group.max_members:
+        group.status = "full"
+
+    chat = Chat.query.filter_by(group_id=group_id).first()
+    if chat:
+        if not ChatMember.query.filter_by(chat_id=chat.id, user_id=request_member.user_id).first():
+            db.session.add(ChatMember(chat_id=chat.id, user_id=request_member.user_id))
+
+    db.session.commit()
+
+    send_notification(
+        user_id=request_member.user_id,
+        type="request_accepted",
+        title=f"Aceptado en {group.name}",
+        content="¡Fuiste agregado al grupo!",
+        data={"group_id": group_id}
+    )
+    return jsonify({"message": "Solicitud aceptada"}), 200
+
+# --- Rechazar solicitud ---
+@group_bp.route("/<int:group_id>/join-request/<int:request_id>/reject", methods=["POST"])
+@jwt_required()
+def reject_join_request(group_id, request_id):
+    user_id = int(get_jwt_identity())
+    admin = GroupMember.query.filter_by(group_id=group_id, user_id=user_id, role="admin", status="active").first()
+    if not admin:
+        return jsonify({"error": "Solo un admin puede rechazar solicitudes"}), 403
+
+    request_member = GroupMember.query.get_or_404(request_id)
+    request_member.status = "rejected"
+    db.session.commit()
+
+    send_notification(
+        user_id=request_member.user_id,
+        type="request_rejected",
+        title=f"Solicitud rechazada en {group.name}",
+        content="Tu solicitud fue rechazada.",
+        data={"group_id": group_id}
+    )
+    return jsonify({"message": "Solicitud rechazada"}), 200
+
+# --- Salir del grupo ---
 @group_bp.route("/<int:group_id>/leave", methods=["POST"])
 @jwt_required()
 def leave_group(group_id):
@@ -163,7 +229,6 @@ def leave_group(group_id):
 
     db.session.commit()
 
-    # Si no quedan miembros activos, eliminar el grupo
     active_count = GroupMember.query.filter_by(group_id=group_id, status="active").count()
     if active_count == 0:
         chat = Chat.query.filter_by(group_id=group_id).first()
@@ -175,7 +240,7 @@ def leave_group(group_id):
 
     return jsonify({"message": "Saliste del grupo"}), 200
 
-
+# --- Mis grupos ---
 @group_bp.route("/my", methods=["GET"])
 @jwt_required()
 def my_groups():
@@ -184,14 +249,13 @@ def my_groups():
     groups = [m.group.to_dict() for m in memberships]
     return jsonify({"groups": groups}), 200
 
-
+# --- Actualizar grupo ---
 @group_bp.route("/<int:group_id>", methods=["PUT"])
 @jwt_required()
 def update_group(group_id):
     user_id = int(get_jwt_identity())
     group = Group.query.get_or_404(group_id)
 
-    # FIX: solo el admin del grupo puede editar (antes cualquier miembro activo podía)
     member = GroupMember.query.filter_by(
         group_id=group_id,
         user_id=user_id,
@@ -202,7 +266,6 @@ def update_group(group_id):
         return jsonify({"error": "Solo el administrador del grupo puede editarlo"}), 403
 
     data = request.get_json()
-
     group.name = data.get("name", group.name)
     group.description = data.get("description", group.description)
     group.city = data.get("city", group.city)

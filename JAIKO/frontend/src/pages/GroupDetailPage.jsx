@@ -268,7 +268,6 @@ export default function GroupDetailPage() {
               </>
             )}
 
-            {/* Botón único de Solicitar ingreso */}
             {!isMember && !isInAnotherGroup && !group.is_full && (
               <button
                 onClick={handleRequestJoin}
@@ -320,6 +319,7 @@ export default function GroupDetailPage() {
           {group.smoking_allowed && <Badge variant="gray">🚬 Fumadores ok</Badge>}
         </div>
 
+        {/* Miembros del grupo */}
         <div className="mt-6">
           <h2 className="font-display font-bold text-xl mb-5">Miembros del grupo</h2>
           {group.members.length === 0 ? (
@@ -345,6 +345,72 @@ export default function GroupDetailPage() {
             </div>
           )}
         </div>
+
+        {/* Solicitudes pendientes */}
+        {isMember && group.join_requests?.length > 0 && (
+          <div className="mt-8">
+            <h2 className="font-display font-bold text-xl mb-4">Solicitudes pendientes</h2>
+            <div className="space-y-4">
+              {group.join_requests.map((req) => (
+                <div key={req.id} className="flex items-center justify-between gap-3 border p-3 rounded-md">
+                  <div className="flex items-center gap-3">
+                    <Avatar
+                      src={req.user.profile?.profile_photo_url}
+                      name={req.user.profile?.name}
+                      size="md"
+                      verified={req.user.profile?.verified}
+                    />
+                    <div>
+                      <Link
+                        to={`/profile/${req.user.id}`}
+                        className="font-semibold hover:text-primary-600 transition-colors"
+                      >
+                        {req.user.profile?.name || `Usuario #${req.user.id}`}
+                      </Link>
+                      {req.user.profile?.profession && (
+                        <p className="text-xs text-orange-400">{req.user.profile.profession}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      className="btn-primary text-sm"
+                      onClick={async () => {
+                        try {
+                          await api.post(`/groups/${id}/join-request/${req.id}/accept`)
+                          toast.success('Usuario agregado al grupo')
+                          const { data } = await api.get(`/groups/${id}`)
+                          setGroup(data.group)
+                        } catch (e) {
+                          toast.error(e.response?.data?.error || 'Error al aceptar')
+                        }
+                      }}
+                    >
+                      Aceptar
+                    </button>
+                    <button
+                      className="btn-secondary text-sm"
+                      onClick={async () => {
+                        try {
+                          await api.post(`/groups/${id}/join-request/${req.id}/reject`)
+                          toast.success('Solicitud rechazada')
+                          const { data } = await api.get(`/groups/${id}`)
+                          setGroup(data.group)
+                        } catch (e) {
+                          toast.error(e.response?.data?.error || 'Error al rechazar')
+                        }
+                      }}
+                    >
+                      Denegar
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   )
