@@ -66,15 +66,14 @@ def search_profiles():
     min_age = request.args.get("min_age", type=int)
     max_age = request.args.get("max_age", type=int)
 
-    # FIX: filtros pets/smoker/schedule ahora se leen y aplican
     pets_filter = request.args.get("pets")       # "true" | "false" | None
     smoker_filter = request.args.get("smoker")   # "true" | "false" | None
     schedule_filter = request.args.get("schedule")  # string | None
 
-    # Query base
+    # JOIN explícito para evitar AmbiguousForeignKeysError
     query = (
         Profile.query
-        .join(User)
+        .join(User, Profile.user_id == User.id)
         .filter(
             Profile.user_id != current_user_id,
             Profile.is_looking == True,
@@ -83,29 +82,28 @@ def search_profiles():
         )
     )
 
-    # Filtro de edad de salida (el roomie debe estar en el rango que busco)
+    # Filtrado por edad
     if min_age:
         query = query.filter(Profile.age >= min_age)
     if max_age:
         query = query.filter(Profile.age <= max_age)
 
-    # Filtro de edad de entrada — reciprocidad
+    # Filtrado recíproco de edad (el roomie debe aceptar la edad del usuario actual)
     if my_profile and my_profile.age:
         query = query.filter(
             Profile.pref_min_age <= my_profile.age,
             Profile.pref_max_age >= my_profile.age,
         )
 
-    # FIX: aplicar filtros pets / smoker / schedule en SQL
+    # Aplicar filtros de pets, smoker y schedule
     if pets_filter is not None and pets_filter != "":
-        query = query.filter(Profile.pets == (pets_filter == "true"))
+        query = query.filter(Profile.pets == (pets_filter.lower() == "true"))
     if smoker_filter is not None and smoker_filter != "":
-        query = query.filter(Profile.smoker == (smoker_filter == "true"))
+        query = query.filter(Profile.smoker == (smoker_filter.lower() == "true"))
     if schedule_filter:
         query = query.filter(Profile.schedule == schedule_filter)
 
-    # FIX: traer todos los candidatos ANTES de filtrar por compatibilidad
-    # (antes se paginaba primero y luego se filtraba, lo que causaba 0 resultados)
+    # Obtener todos los perfiles candidatos antes de filtrar por compatibilidad
     all_profiles = query.all()
 
     results = []
@@ -118,9 +116,10 @@ def search_profiles():
             d["mismatches"] = mismatches
             results.append(d)
 
+    # Ordenar por compatibilidad descendente
     results.sort(key=lambda x: x["compatibility"], reverse=True)
 
-    # Paginar sobre los resultados ya filtrados
+    # Paginación
     total = len(results)
     paged = results[(page - 1) * per_page: page * per_page]
     has_more = (page * per_page) < total
