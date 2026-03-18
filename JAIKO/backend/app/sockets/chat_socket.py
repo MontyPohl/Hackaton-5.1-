@@ -3,6 +3,7 @@ from flask import request
 from flask_socketio import emit, join_room, leave_room, disconnect
 from flask_jwt_extended import decode_token
 from jwt.exceptions import InvalidTokenError
+from sqlalchemy.orm import joinedload
 from ..extensions import socketio, db
 from ..models import Chat, ChatMember, Message
 
@@ -100,12 +101,18 @@ def on_send_message(data):
     emit("receive_message", msg.to_dict(), room=room)
 
     # Send push notification to offline members
-    chat = Chat.query.get(chat_id)
+    # Eagerly load members to avoid N+1 queries
+    chat = (
+        Chat.query
+        .filter_by(id=chat_id)
+        .options(joinedload(Chat.members))
+        .first()
+    )
+    sender_profile = msg.sender.profile
+    sender_name = sender_profile.name if sender_profile else "Alguien"
     from ..services.notification_service import send_notification
     for cm in chat.members:
         if cm.user_id != user_id:
-            sender_profile = msg.sender.profile
-            sender_name = sender_profile.name if sender_profile else "Alguien"
             send_notification(
                 user_id=cm.user_id,
                 type="message",

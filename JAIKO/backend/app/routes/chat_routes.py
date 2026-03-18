@@ -1,5 +1,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from sqlalchemy.orm import joinedload
+from sqlalchemy import func
 from ..extensions import db
 from ..models import Chat, ChatMember, Message, User
 
@@ -10,14 +12,58 @@ chat_bp = Blueprint("chats", __name__)
 @jwt_required()
 def get_my_chats():
     user_id = int(get_jwt_identity())
-    memberships = ChatMember.query.filter_by(user_id=user_id).all()
-    chats = []
-    for m in memberships:
-        chat_data = m.chat.to_dict(user_id=user_id)
-        chats.append(chat_data)
-    # Sort by last message
-    chats.sort(key=lambda c: c.get("last_message", {}).get("created_at", "") if c.get("last_message") else "", reverse=True)
-    return jsonify({"chats": chats}), 200
+
+    # 1 query: get chat IDs for this user
+    chat_ids = [
+        row.chat_id
+        for row in db.session.query(ChatMember.chat_id).filter_by(user_id=user_id).all()
+    ]
+    if not chat_ids:
+        return jsonify({"chats": []}), 200
+
+    # 1 query: load chats + members + user profiles eagerly
+    chats = (
+        Chat.query
+        .filter(Chat.id.in_(chat_ids))
+        .options(
+            joinedload(Chat.members).joinedload(ChatMember.user)
+        )
+        .all()
+    )
+
+    # 1 query: get last message per chat using MAX(id) subquery
+    last_msg_subq = (
+        db.session.query(func.max(Message.id))
+        .filter(Message.chat_id.in_(chat_ids))
+        .group_by(Message.chat_id)
+        .subquery()
+    )
+    last_messages = (
+        Message.query
+        .filter(Message.id.in_(last_msg_subq))
+        .options(joinedload(Message.sender))
+        .all()
+    )
+    last_msg_by_chat = {m.chat_id: m for m in last_messages}
+
+    result = []
+    for chat in chats:
+        last_msg = last_msg_by_chat.get(chat.id)
+        result.append({
+            "id": chat.id,
+            "type": chat.type,
+            "group_id": chat.group_id,
+            "listing_id": chat.listing_id,
+            "members": [m.to_dict() for m in chat.members],
+            "last_message": last_msg.to_dict() if last_msg else None,
+            "created_at": chat.created_at.isoformat(),
+        })
+
+    result.sort(
+        key=lambda c: c["last_message"]["created_at"] if c.get("last_message") else "",
+        reverse=True,
+    )
+    return jsonify({"chats": result}), 200
 
 
 @chat_bp.route("/private/<int:other_user_id>", methods=["POST"])

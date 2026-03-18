@@ -22,7 +22,7 @@ def create_app(env: str = None) -> Flask:
         app,
         cors_allowed_origins=app.config["FRONTEND_URL"],
         async_mode="threading",
-        logger=True,
+        logger=False,
         engineio_logger=False,
     )
 

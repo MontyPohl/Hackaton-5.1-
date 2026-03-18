@@ -22,7 +22,10 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false)
   const bottomRef = useRef(null)
   const typingTimer = useRef(null)
+  const isLoadingHistory = useRef(false)
   const socket = getSocket()
+
+  const MAX_MESSAGES = 100
 
   // Load chat list
   useEffect(() => {
@@ -39,6 +42,7 @@ export default function ChatPage() {
     setActive(chat)
     navigate(`/chat/${chat.id}`, { replace: true })
     setLoading(true)
+    isLoadingHistory.current = true
     const { data } = await api.get(`/chats/${chat.id}/messages`)
     setMessages(data.messages)
     setLoading(false)
@@ -53,7 +57,12 @@ export default function ChatPage() {
     if (!socket) return
     const handleMsg = (msg) => {
       if (msg.chat_id === active?.id) {
-        setMessages(m => [...m, msg])
+        setMessages(m => {
+          // Deduplicate: ignore if already present
+          if (m.some(existing => existing.id === msg.id)) return m
+          const updated = [...m, msg]
+          return updated.length > MAX_MESSAGES ? updated.slice(-MAX_MESSAGES) : updated
+        })
       }
       // Update last message in chat list
       setChats(cs => cs.map(c => c.id === msg.chat_id ? { ...c, last_message: msg } : c))
@@ -73,9 +82,15 @@ export default function ChatPage() {
     }
   }, [socket, active?.id, user?.id])
 
-  // Auto-scroll
+  // Auto-scroll: al cargar historial va directo al fondo (sin animacion),
+  // en mensajes nuevos hace scroll suave
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (isLoadingHistory.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'instant' })
+      isLoadingHistory.current = false
+    } else {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
   }, [messages])
 
   const sendMessage = () => {
