@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Send, ArrowLeft } from 'lucide-react'
 import api from '../services/api'
-import { getSocket } from '../services/socket'
+import { getSocket, onSocketConnect } from '../services/socket'
 import useAuthStore from '../context/authStore'
 import { Avatar, Spinner, EmptyState } from '../components/ui'
 import { formatDistanceToNow } from 'date-fns'
@@ -23,7 +23,14 @@ export default function ChatPage() {
   const bottomRef = useRef(null)
   const typingTimer = useRef(null)
   const isLoadingHistory = useRef(false)
-  const socket = getSocket()
+  const [socket, setSocket] = useState(() => getSocket())
+
+  // Re-render when socket connects (fixes race condition on initial load)
+  useEffect(() => {
+    const s = getSocket()
+    if (s) { setSocket(s); return }
+    return onSocketConnect((s) => setSocket(s))
+  }, [])
 
   const MAX_MESSAGES = 100
 
