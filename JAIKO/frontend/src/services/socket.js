@@ -8,7 +8,8 @@ export const connectSocket = () => {
   // Don't recreate if socket already exists (even while connecting)
   if (!token || socket) return
 
-  socket = io('/', {
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'
+  socket = io(backendUrl, {
     query: { token },
     transports: ['websocket'],
     reconnectionAttempts: 5,
