@@ -18,10 +18,14 @@ def create_app(env: str = None) -> Flask:
         resources={r"/api/*": {"origins": app.config["FRONTEND_URL"]}},
         supports_credentials=True,
     )
+
+    # CORRECCIÓN CRÍTICA: async_mode debe ser "eventlet" porque run.py
+    # hace eventlet.monkey_patch(). Usar "threading" con eventlet activo
+    # causa que los socketio.emit() a otros clientes fallen silenciosamente.
     socketio.init_app(
         app,
         cors_allowed_origins=app.config["FRONTEND_URL"],
-        async_mode="threading",
+        async_mode="eventlet",   # <-- CAMBIO: era "threading"
         logger=False,
         engineio_logger=False,
     )
