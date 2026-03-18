@@ -7,8 +7,7 @@ from flask_bcrypt import Bcrypt
 
 db = SQLAlchemy()
 migrate = Migrate()
-# Configuramos CORS aquí y async_mode=eventlet
-socketio = SocketIO(cors_allowed_origins="*", async_mode="eventlet")
+socketio = SocketIO()
 jwt = JWTManager()
 cors = CORS()
 bcrypt = Bcrypt()
