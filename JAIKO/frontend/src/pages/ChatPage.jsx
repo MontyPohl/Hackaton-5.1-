@@ -24,42 +24,14 @@ export default function ChatPage() {
   const bottomRef = useRef(null)
   const typingTimer = useRef(null)
   const isLoadingHistory = useRef(false)
-
-  // CORRECCIÓN CRÍTICA: activeChatIdRef se actualiza SINCRÓNICAMENTE
-  // dentro de selectChat, no a través de useEffect (que es asíncrono).
-  // Antes, cuando llegaba un mensaje justo después de abrir el chat,
-  // activeRef.current era null y el mensaje se descartaba silenciosamente.
   const activeChatIdRef = useRef(null)
-
-  const socketRef = useRef(getSocket())
-  const [, forceRender] = useState(0)
+  const socketRef = useRef(null)
 
   const MAX_MESSAGES = 100
 
-  // ── Socket: conectar y mantener referencia actualizada ───────────────────
   useEffect(() => {
-    const unsub = onSocketConnect((s) => {
-      socketRef.current = s
-      forceRender(n => n + 1)
-    })
-    if (!socketRef.current) {
-      socketRef.current = getSocket()
-    }
-    return unsub
-  }, [])
-
-  // ── Socket: registrar listener de mensajes ───────────────────────────────
-  useEffect(() => {
-    const socket = socketRef.current
-    if (!socket) return
-
     const handleMsg = (msg) => {
-      // Usamos activeChatIdRef que se actualiza sincrónicamente
-      console.log('MSG chat_id:', msg.chat_id, typeof msg.chat_id)
-      console.log('REF valor:', activeChatIdRef.current, typeof activeChatIdRef.current)
-
-
-
+      console.log('📨 handleMsg — chat_id:', msg.chat_id, '| activo:', activeChatIdRef.current)
       if (msg.chat_id === activeChatIdRef.current) {
         setMessages(m => {
           if (m.some(ex => ex.id === msg.id)) return m
@@ -67,7 +39,6 @@ export default function ChatPage() {
           return updated.length > MAX_MESSAGES ? updated.slice(-MAX_MESSAGES) : updated
         })
       }
-      // Siempre actualizar el último mensaje en la lista de chats
       setChats(cs => cs.map(c =>
         c.id === msg.chat_id ? { ...c, last_message: msg } : c
       ))
@@ -76,20 +47,31 @@ export default function ChatPage() {
     const handleTyping = ({ user_id }) => { if (user_id !== user?.id) setTyping(true) }
     const handleStopTyping = () => setTyping(false)
 
-    socket.on('receive_message', handleMsg)
-    socket.on('user_typing', handleTyping)
-    socket.on('user_stop_typing', handleStopTyping)
+    const unsub = onSocketConnect((s) => {
+      socketRef.current = s
+      s.off('receive_message', handleMsg)
+      s.off('user_typing', handleTyping)
+      s.off('user_stop_typing', handleStopTyping)
+      s.on('receive_message', handleMsg)
+      s.on('user_typing', handleTyping)
+      s.on('user_stop_typing', handleStopTyping)
+      console.log('✅ Listeners registrados en socket:', s.id)
+      if (activeChatIdRef.current) {
+        s.emit('join_chat', { chat_id: activeChatIdRef.current })
+      }
+    })
 
     return () => {
-      socket.off('receive_message', handleMsg)
-      socket.off('user_typing', handleTyping)
-      socket.off('user_stop_typing', handleStopTyping)
+      unsub()
+      const s = socketRef.current
+      if (s) {
+        s.off('receive_message', handleMsg)
+        s.off('user_typing', handleTyping)
+        s.off('user_stop_typing', handleStopTyping)
+      }
     }
-  })  // Sin dependencias: se re-registra en cada render para garantizar
-  // que handleMsg siempre cierra sobre el activeChatIdRef más reciente.
-  // El off/on es instantáneo y no genera problemas de rendimiento.
+  }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Cargar lista de chats al montar ──────────────────────────────────────
   useEffect(() => {
     api.get('/chats/').then(({ data }) => {
       setChats(data.chats)
@@ -100,34 +82,21 @@ export default function ChatPage() {
     })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Seleccionar un chat ───────────────────────────────────────────────────
   const selectChat = useCallback(async (chat) => {
-    // CORRECCIÓN: actualizar el ref SINCRÓNICAMENTE antes de cualquier await
     activeChatIdRef.current = chat.id
     setActive(chat)
     navigate(`/chat/${chat.id}`, { replace: true })
-
     setLoading(true)
     isLoadingHistory.current = true
     const { data } = await api.get(`/chats/${chat.id}/messages`)
     setMessages(data.messages)
     setLoading(false)
-
-    // Unirse al room del chat en el socket
-    const socket = socketRef.current
-    if (socket?.connected) {
-      socket.emit('join_chat', { chat_id: chat.id })
+    const s = socketRef.current
+    if (s?.connected) {
+      s.emit('join_chat', { chat_id: chat.id })
     }
   }, [navigate])
 
-  // ── Re-join si el socket se reconecta con un chat ya activo ──────────────
-  useEffect(() => {
-    const socket = socketRef.current
-    if (!socket || !activeChatIdRef.current) return
-    socket.emit('join_chat', { chat_id: activeChatIdRef.current })
-  }, [socketRef.current]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Auto-scroll ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (isLoadingHistory.current) {
       bottomRef.current?.scrollIntoView({ behavior: 'instant' })
@@ -137,13 +106,12 @@ export default function ChatPage() {
     }
   }, [messages])
 
-  // ── Enviar mensaje ────────────────────────────────────────────────────────
   const sendMessage = () => {
-    const socket = socketRef.current
-    if (!text.trim() || !activeChatIdRef.current || !socket?.connected) return
-    socket.emit('send_message', { chat_id: activeChatIdRef.current, content: text.trim() })
+    const s = socketRef.current
+    if (!text.trim() || !activeChatIdRef.current || !s?.connected) return
+    s.emit('send_message', { chat_id: activeChatIdRef.current, content: text.trim() })
     setText('')
-    socket.emit('stop_typing', { chat_id: activeChatIdRef.current })
+    s.emit('stop_typing', { chat_id: activeChatIdRef.current })
   }
 
   const handleKeyDown = (e) => {
@@ -151,13 +119,13 @@ export default function ChatPage() {
   }
 
   const handleTypingInput = (e) => {
-    const socket = socketRef.current
+    const s = socketRef.current
     setText(e.target.value)
-    if (socket?.connected && activeChatIdRef.current) {
-      socket.emit('typing', { chat_id: activeChatIdRef.current })
+    if (s?.connected && activeChatIdRef.current) {
+      s.emit('typing', { chat_id: activeChatIdRef.current })
       clearTimeout(typingTimer.current)
       typingTimer.current = setTimeout(
-        () => socket.emit('stop_typing', { chat_id: activeChatIdRef.current }),
+        () => s.emit('stop_typing', { chat_id: activeChatIdRef.current }),
         1500
       )
     }
@@ -177,10 +145,7 @@ export default function ChatPage() {
   return (
     <div className="max-w-6xl mx-auto px-4 py-6">
       <h1 className="font-display font-extrabold text-3xl mb-6">Chats</h1>
-
       <div className="flex h-[70vh] bg-white rounded-2xl border border-orange-100 shadow-sm overflow-hidden">
-
-        {/* Sidebar */}
         <div className={clsx(
           'w-72 flex-shrink-0 border-r border-orange-100 flex flex-col',
           active && 'hidden md:flex'
@@ -209,10 +174,8 @@ export default function ChatPage() {
           </div>
         </div>
 
-        {/* Chat window */}
         {active ? (
           <div className="flex-1 flex flex-col">
-            {/* Header */}
             <div className="flex items-center gap-3 p-4 border-b border-orange-100">
               <button className="md:hidden p-1" onClick={() => {
                 setActive(null)
@@ -226,8 +189,6 @@ export default function ChatPage() {
                 {typing && <p className="text-xs text-primary-500 animate-pulse">Escribiendo...</p>}
               </div>
             </div>
-
-            {/* Mensajes */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {loading && <div className="flex justify-center"><Spinner /></div>}
               {messages.map(msg => {
@@ -237,9 +198,7 @@ export default function ChatPage() {
                     {!isMe && <Avatar src={msg.sender_photo} name={msg.sender_name} size="sm" />}
                     <div className={clsx(
                       'max-w-xs lg:max-w-md px-4 py-2.5 rounded-2xl text-sm',
-                      isMe
-                        ? 'bg-primary-500 text-white rounded-br-sm'
-                        : 'bg-orange-50 text-brand-dark rounded-bl-sm'
+                      isMe ? 'bg-primary-500 text-white rounded-br-sm' : 'bg-orange-50 text-brand-dark rounded-bl-sm'
                     )}>
                       {!isMe && <p className="font-semibold text-xs text-primary-600 mb-0.5">{msg.sender_name}</p>}
                       <p className="leading-relaxed">{msg.content}</p>
@@ -252,8 +211,6 @@ export default function ChatPage() {
               })}
               <div ref={bottomRef} />
             </div>
-
-            {/* Input */}
             <div className="p-4 border-t border-orange-100 flex items-end gap-3">
               <textarea
                 value={text}
