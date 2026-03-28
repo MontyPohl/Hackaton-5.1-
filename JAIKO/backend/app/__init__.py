@@ -25,10 +25,10 @@ def create_app(env: str = None) -> Flask:
     socketio.init_app(
         app,
         cors_allowed_origins=allowed_origins,
-        async_mode="threading",
-        logger=False,
-        engineio_logger=False,
+        async_mode=None, # Deja que Flask-SocketIO elija eventlet automáticamente
+        # ... resto de parámetros
     )
+
 
     from .routes.auth_routes import auth_bp
     from .routes.profile_routes import profile_bp
