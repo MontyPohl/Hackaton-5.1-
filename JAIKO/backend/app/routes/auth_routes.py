@@ -2,51 +2,54 @@ import os
 import requests
 from datetime import datetime
 from flask import Blueprint, request, jsonify, current_app
-from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
+from flask_jwt_extended import (
+    create_access_token,
+    jwt_required,
+    get_jwt_identity,
+    get_jwt,
+)
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from ..extensions import db
-from ..models import User, Profile
+from ..models import User, Profile, TokenBlocklist
 
 auth_bp = Blueprint("auth", __name__)
 
+
 def validar_captcha(token):
-    api_key = os.getenv('AIzaSyDQ3MhacAZ8rpAldrtTxhSsK9KbM9jo5DA')  # Tu API Key (AIza...)
+    api_key = os.getenv(
+        "RECAPTCHA_API_KEY"
+    )  # Bug #1 corregido: era el valor hardcodeado
     project_id = "jaiko-490414"
     site_key = "6LeFE54sAAAAANoCNMtlX1CWET8BuIg6zcy4XE-8"
-    
+
     if not token:
         return False
-        
+
     try:
-        # URL FINAL CORREGIDA
-        url = f"https://recaptchaenterprise.googleapis.com{project_id}/assessments?key={api_key}"
-        
+        # Bug #2 corregido: la URL ahora incluye /v1/projects/
+        url = f"https://recaptchaenterprise.googleapis.com/v1/projects/{project_id}/assessments?key={api_key}"
+
         payload = {
-            "event": {
-                "token": token,
-                "siteKey": site_key,
-                "expectedAction": "register"
-            }
+            "event": {"token": token, "siteKey": site_key, "expectedAction": "register"}
         }
-        
+
         response = requests.post(url, json=payload, timeout=5)
         result = response.json()
-        
-        print(f"DEBUG RECAPTCHA RESPONSE: {result}")
-        
-        if result.get('tokenProperties', {}).get('valid'):
-            score = result.get('riskAnalysis', {}).get('score', 0)
-            return score >= 0.3 
+
+        if result.get("tokenProperties", {}).get("valid"):
+            score = result.get("riskAnalysis", {}).get("score", 0)
+            return score >= 0.3
         return False
     except Exception as e:
         print(f"Error en validación reCAPTCHA: {e}")
         return False
 
+
 @auth_bp.route("/register", methods=["POST"])
 def register():
     data = request.get_json()
-    captcha_token = data.get('captcha_token')
+    captcha_token = data.get("captcha_token")
 
     if not validar_captcha(captcha_token):
         return jsonify({"error": "Validación de seguridad fallida. Reintentá."}), 400
@@ -58,7 +61,7 @@ def register():
         return jsonify({"error": "El usuario ya existe"}), 400
 
     try:
-        new_user = User(email=data["email"])
+        new_user = User(email=data["email"])  # type: ignore[call-arg]
         new_user.set_password(data["password"])
         db.session.add(new_user)
         db.session.flush()
@@ -71,14 +74,20 @@ def register():
         db.session.commit()
 
         access_token = create_access_token(identity=str(new_user.id))
-        return jsonify({
-            "access_token": access_token,
-            "user": new_user.to_dict(),
-            "profile": new_profile.to_dict()
-        }), 201
+        return (
+            jsonify(
+                {
+                    "access_token": access_token,
+                    "user": new_user.to_dict(),
+                    "profile": new_profile.to_dict(),
+                }
+            ),
+            201,
+        )
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
+
 
 @auth_bp.route("/login", methods=["POST"])
 def login():
@@ -93,12 +102,18 @@ def login():
         db.session.commit()
 
         access_token = create_access_token(identity=str(user.id))
-        return jsonify({
-            "access_token": access_token,
-            "user": user.to_dict(),
-            "profile": user.profile.to_dict() if user.profile else None
-        }), 200
+        return (
+            jsonify(
+                {
+                    "access_token": access_token,
+                    "user": user.to_dict(),
+                    "profile": user.profile.to_dict() if user.profile else None,
+                }
+            ),
+            200,
+        )
     return jsonify({"error": "Credenciales inválidas"}), 401
+
 
 @auth_bp.route("/google", methods=["POST"])
 def google_login():
@@ -110,7 +125,9 @@ def google_login():
 
     try:
         client_id = current_app.config["GOOGLE_CLIENT_ID"]
-        id_info = id_token.verify_oauth2_token(token, google_requests.Request(), client_id)
+        id_info = id_token.verify_oauth2_token(
+            token, google_requests.Request(), client_id
+        )
     except Exception as e:
         return jsonify({"error": f"Token inválido: {str(e)}"}), 401
 
@@ -122,7 +139,7 @@ def google_login():
 
     if not user:
         is_new_user = True
-        user = User(email=email, google_id=google_id)
+        user = User(email=email, google_id=google_id)  # type: ignore[call-arg]
         db.session.add(user)
         db.session.flush()
 
@@ -138,12 +155,18 @@ def google_login():
     db.session.commit()
 
     access_token = create_access_token(identity=str(user.id))
-    return jsonify({
-        "access_token": access_token,
-        "user": user.to_dict(),
-        "profile": user.profile.to_dict() if user.profile else None,
-        "is_new_user": is_new_user
-    }), 200
+    return (
+        jsonify(
+            {
+                "access_token": access_token,
+                "user": user.to_dict(),
+                "profile": user.profile.to_dict() if user.profile else None,
+                "is_new_user": is_new_user,
+            }
+        ),
+        200,
+    )
+
 
 @auth_bp.route("/me", methods=["GET"])
 @jwt_required()
@@ -153,7 +176,34 @@ def get_me():
     if not user:
         return jsonify({"error": "Usuario no encontrado"}), 404
 
-    return jsonify({
-        "user": user.to_dict(),
-        "profile": user.profile.to_dict(include_private=True) if user.profile else None
-    }), 200
+    return (
+        jsonify(
+            {
+                "user": user.to_dict(),
+                "profile": (
+                    user.profile.to_dict(include_private=True) if user.profile else None
+                ),
+            }
+        ),
+        200,
+    )
+
+
+@auth_bp.route("/logout", methods=["POST"])
+@jwt_required()
+def logout():
+    """
+    Invalida el token actual agregando su JTI a la lista negra (TokenBlocklist).
+
+    Por qué usamos el JTI y no el token completo:
+    El JTI (JWT ID) es un identificador único y corto (UUID de 36 chars) que
+    Flask-JWT-Extended incluye en cada token. Guardarlo es mucho más eficiente
+    que guardar el token completo, que puede tener cientos de caracteres.
+
+    El callback token_in_blocklist_loader en __init__.py consulta esta tabla
+    en cada petición protegida con @jwt_required().
+    """
+    jti = get_jwt()["jti"]
+    db.session.add(TokenBlocklist(jti=jti, created_at=datetime.utcnow()))  # type: ignore[call-arg]
+    db.session.commit()
+    return jsonify({"message": "Sesión cerrada correctamente"}), 200

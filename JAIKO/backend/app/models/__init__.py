@@ -3,7 +3,14 @@ from .profile import Profile
 from .listing import Listing, ListingPhoto
 from .group import Group, GroupMember
 from .chat import Chat, ChatMember, Message
-from .misc import RoommateRequest, Notification, Review, Report, VerificationRequest
+from .misc import (
+    RoommateRequest,
+    Notification,
+    Review,
+    Report,
+    VerificationRequest,
+    TokenBlocklist,
+)
 
 __all__ = [
     "User",
@@ -20,4 +27,5 @@ __all__ = [
     "Review",
     "Report",
     "VerificationRequest",
+    "TokenBlocklist",
 ]

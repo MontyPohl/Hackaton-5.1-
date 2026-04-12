@@ -178,3 +178,29 @@ class VerificationRequest(db.Model):
             "rejection_reason": self.rejection_reason,
             "created_at": self.created_at.isoformat(),
         }
+
+
+class TokenBlocklist(db.Model):
+    """
+    Lista negra de tokens JWT revocados.
+
+    Por qué existe este modelo:
+    Un JWT firmado es válido hasta su fecha de expiración (exp) sin importar
+    nada más — el servidor no puede "cancelarlo" solo con la firma. Para poder
+    invalidar tokens antes de que venzan (logout real, bloqueo de usuarios),
+    necesitamos registrar en la DB qué tokens ya no deben aceptarse.
+
+    Cuando un usuario hace logout, su token se guarda aquí. Flask-JWT-Extended
+    consulta esta tabla en cada petición protegida con @jwt_required() gracias
+    al callback token_in_blocklist_loader registrado en __init__.py.
+
+    El campo jti (JWT ID) es un identificador único que Flask-JWT-Extended
+    incluye automáticamente en cada token que emite.
+    """
+
+    __tablename__ = "token_blocklist"
+
+    id = db.Column(db.Integer, primary_key=True)
+    # jti = JWT ID, string único por token (incluido automáticamente por Flask-JWT-Extended)
+    jti = db.Column(db.String(36), nullable=False, unique=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

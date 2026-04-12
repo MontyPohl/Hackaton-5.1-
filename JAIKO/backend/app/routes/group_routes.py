@@ -6,6 +6,7 @@ from ..services.notification_service import send_notification
 
 group_bp = Blueprint("groups", __name__)
 
+
 # --- Listar grupos ---
 @group_bp.route("/", methods=["GET"])
 @jwt_required()
@@ -23,6 +24,7 @@ def list_groups():
         .all()
     )
     return jsonify({"groups": [g.to_dict() for g in groups], "total": total, "page": page}), 200
+
 
 # --- Crear grupo ---
 @group_bp.route("/", methods=["POST"])
@@ -62,6 +64,7 @@ def create_group():
     db.session.commit()
     return jsonify({"group": group.to_dict()}), 201
 
+
 # --- Obtener grupo ---
 @group_bp.route("/<int:group_id>", methods=["GET"])
 @jwt_required()
@@ -82,6 +85,7 @@ def get_group(group_id):
         for m in pending_members
     ]
     return jsonify({"group": group_data}), 200
+
 
 # --- Unirse directamente al grupo ---
 @group_bp.route("/<int:group_id>/join", methods=["POST"])
@@ -123,6 +127,7 @@ def join_group(group_id):
     )
     return jsonify({"message": "Te uniste al grupo", "group": group.to_dict()}), 200
 
+
 # --- Solicitud de unirse al grupo ---
 @group_bp.route("/<int:group_id>/join-request", methods=["POST"])
 @jwt_required()
@@ -159,6 +164,7 @@ def request_join_group(group_id):
 
     return jsonify({"message": "Solicitud enviada", "member": {"id": member.id, "status": member.status}}), 200
 
+
 # --- Aceptar solicitud ---
 @group_bp.route("/<int:group_id>/join-request/<int:request_id>/accept", methods=["POST"])
 @jwt_required()
@@ -191,19 +197,35 @@ def accept_join_request(group_id, request_id):
     )
     return jsonify({"message": "Solicitud aceptada"}), 200
 
+
 # --- Rechazar solicitud ---
+# BUG #3 CORREGIDO: se agregó Group.query.get_or_404(group_id) para definir
+# la variable 'group' antes de usarla en send_notification(). Sin esta línea,
+# Python lanzaba NameError en runtime al intentar leer group.name.
 @group_bp.route("/<int:group_id>/join-request/<int:request_id>/reject", methods=["POST"])
 @jwt_required()
 def reject_join_request(group_id, request_id):
     user_id = int(get_jwt_identity())
-    admin = GroupMember.query.filter_by(group_id=group_id, user_id=user_id, role="admin", status="active").first()
+
+    # 1. Verificar que quien rechaza es admin activo del grupo
+    admin = GroupMember.query.filter_by(
+        group_id=group_id,
+        user_id=user_id,
+        role="admin",
+        status="active"
+    ).first()
     if not admin:
         return jsonify({"error": "Solo un admin puede rechazar solicitudes"}), 403
 
+    # 2. Obtener la solicitud y el grupo
     request_member = GroupMember.query.get_or_404(request_id)
+    group = Group.query.get_or_404(group_id)  # ← línea que faltaba (Bug #3)
+
+    # 3. Actualizar estado y persistir
     request_member.status = "rejected"
     db.session.commit()
 
+    # 4. Notificar al usuario rechazado (ahora group.name existe y no lanza error)
     send_notification(
         user_id=request_member.user_id,
         type="request_rejected",
@@ -211,7 +233,9 @@ def reject_join_request(group_id, request_id):
         content="Tu solicitud fue rechazada.",
         data={"group_id": group_id}
     )
+
     return jsonify({"message": "Solicitud rechazada"}), 200
+
 
 # --- Salir del grupo ---
 @group_bp.route("/<int:group_id>/leave", methods=["POST"])
@@ -240,6 +264,7 @@ def leave_group(group_id):
 
     return jsonify({"message": "Saliste del grupo"}), 200
 
+
 # --- Mis grupos ---
 @group_bp.route("/my", methods=["GET"])
 @jwt_required()
@@ -248,6 +273,7 @@ def my_groups():
     memberships = GroupMember.query.filter_by(user_id=user_id, status="active").all()
     groups = [m.group.to_dict() for m in memberships]
     return jsonify({"groups": groups}), 200
+
 
 # --- Actualizar grupo ---
 @group_bp.route("/<int:group_id>", methods=["PUT"])

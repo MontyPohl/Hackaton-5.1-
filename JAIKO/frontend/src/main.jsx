@@ -7,7 +7,11 @@ import App from './App'
 import './index.css'
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
-console.log("CLIENT ID:", import.meta.env.VITE_GOOGLE_CLIENT_ID)
+
+// Línea eliminada: console.log("CLIENT ID:", import.meta.env.VITE_GOOGLE_CLIENT_ID)
+// Por qué: imprimía el Client ID de Google en la consola del navegador en
+// producción, visible para cualquier usuario que abra las DevTools.
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
