@@ -20,10 +20,11 @@ export default function AdminPage() {
   const [verifications, setVerifications] = useState([])
   const [loading, setLoading] = useState(true)
 
-  const [selfieModal, setSelfieModal] = useState(null)
+  // Modales y Estados de UI
+  const [selfieModal, setSelfieModal] = useState(null)   // { url, userName, vr }
   const [loadingSelfie, setLoadingSelfie] = useState(null)
   const [rejectReason, setRejectReason] = useState('')
-  const [warnModal, setWarnModal] = useState(null)
+  const [warnModal, setWarnModal] = useState(null)       // { id, note }
   const [userSearch, setUserSearch] = useState('')
 
   useEffect(() => {
@@ -48,6 +49,7 @@ export default function AdminPage() {
     fetchData()
   }, [])
 
+  /* ── Reportes ─────────────────────────────────────────────────────────── */
   const handleReport = async (id, action, status = 'reviewed', adminNote = '') => {
     try {
       await api.put(`/admin/reports/${id}`, { action, status, admin_note: adminNote })
@@ -58,6 +60,7 @@ export default function AdminPage() {
     }
   }
 
+  /* ── Usuarios ─────────────────────────────────────────────────────────── */
   const handleUserStatus = async (userId, status) => {
     try {
       await api.put(`/admin/users/${userId}/status`, { status })
@@ -68,6 +71,7 @@ export default function AdminPage() {
     }
   }
 
+  /* ── Verificaciones ───────────────────────────────────────────────────── */
   const handleVerSelfie = async (vr) => {
     setLoadingSelfie(vr.id)
     try {
@@ -96,6 +100,7 @@ export default function AdminPage() {
 
   const pendingCount = verifications?.length || 0
 
+  /* ── Usuarios filtrados ───────────────────────────────────────────────── */
   const filteredUsers = users.filter(u => {
     const q = userSearch.toLowerCase()
     return (
@@ -105,6 +110,7 @@ export default function AdminPage() {
     )
   })
 
+  /* ── Helpers de UI ───────────────────────────────────────────────────── */
   const statusBadge = (status) => {
     const map = {
       active: 'bg-green-100 text-green-700',
@@ -134,7 +140,7 @@ export default function AdminPage() {
   return (
     <div className="max-w-6xl mx-auto px-3 sm:px-4 py-5 sm:py-8">
 
-      {/* Header */}
+      {/* HEADER */}
       <div className="flex items-center gap-3 mb-6 sm:mb-8">
         <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-brand-dark flex items-center justify-center flex-shrink-0">
           <ShieldX size={18} className="text-primary-400" />
@@ -145,7 +151,7 @@ export default function AdminPage() {
         </div>
       </div>
 
-      {/* Tabs — scrollable on mobile */}
+      {/* TABS - scrollable on mobile */}
       <div className="flex gap-1 sm:gap-2 mb-6 border-b border-orange-100 overflow-x-auto pb-0 -mx-3 px-3 sm:mx-0 sm:px-0">
         {TABS.map((t, i) => (
           <button
@@ -169,7 +175,6 @@ export default function AdminPage() {
       {/* ── ESTADÍSTICAS ─────────────────────────────────────────────────── */}
       {tab === 0 && (
         <div className="space-y-4 sm:space-y-6">
-          {/* Stat cards — 2 cols on mobile, 4 on md */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
             {[
               {
@@ -225,7 +230,7 @@ export default function AdminPage() {
             ))}
           </div>
 
-          {/* Summary */}
+          {/* Actividad resumida */}
           <div className="card p-4 sm:p-5">
             <h2 className="font-bold text-sm text-gray-500 uppercase tracking-wide mb-3 sm:mb-4">Resumen de actividad</h2>
             <div className="grid grid-cols-3 divide-x divide-orange-100 text-center">
@@ -278,22 +283,26 @@ export default function AdminPage() {
                 <div className="flex flex-wrap gap-2 sm:gap-3 text-xs text-gray-400">
                   {r?.reported_user_id && (
                     <span className="flex items-center gap-1">
-                      <Users size={11} /> Usuario: <strong className="text-gray-600">#{r.reported_user_id}</strong>
+                      <Users size={11} /> Usuario reportado: <strong className="text-gray-600">#{r.reported_user_id}</strong>
                     </span>
                   )}
                   {r?.reporter_id && (
                     <span className="flex items-center gap-1">
-                      <AlertCircle size={11} /> Por: <strong className="text-gray-600">#{r.reporter_id}</strong>
+                      <AlertCircle size={11} /> Reportado por: <strong className="text-gray-600">#{r.reporter_id}</strong>
+                    </span>
+                  )}
+                  {r?.reported_listing_id && (
+                    <span className="flex items-center gap-1">
+                      <Home size={11} /> Listing: <strong className="text-gray-600">#{r.reported_listing_id}</strong>
                     </span>
                   )}
                 </div>
 
-                {/* Action buttons — wrap on small screens */}
                 <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-orange-50">
                   {r?.reported_user_id && (
                     <button onClick={() => handleReport(r.id, 'block', 'reviewed')}
                       className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-red-50 text-red-600 text-xs font-semibold hover:bg-red-100 transition-colors">
-                      <Ban size={12} /> Bloquear
+                      <Ban size={12} /> Bloquear usuario
                     </button>
                   )}
                   {r?.reported_user_id && (
@@ -310,9 +319,9 @@ export default function AdminPage() {
 
                 {warnModal?.id === r.id && (
                   <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 space-y-2">
-                    <p className="text-xs font-semibold text-yellow-700">Nota de advertencia:</p>
+                    <p className="text-xs font-semibold text-yellow-700">Nota de advertencia para el usuario:</p>
                     <textarea
-                      rows={2} placeholder="Describe la razón..."
+                      rows={2} placeholder="Describe la razón de la advertencia..."
                       value={warnModal.note}
                       onChange={e => setWarnModal(w => ({ ...w, note: e.target.value }))}
                       className="w-full text-xs rounded-lg border border-yellow-300 bg-white px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-yellow-400"
@@ -324,7 +333,7 @@ export default function AdminPage() {
                       </button>
                       <button onClick={() => { handleReport(r.id, 'warn', 'reviewed', warnModal.note); setWarnModal(null) }}
                         className="px-3 py-1.5 text-xs rounded-lg bg-yellow-500 text-white font-semibold hover:bg-yellow-600">
-                        Enviar
+                        Enviar advertencia
                       </button>
                     </div>
                   </div>
@@ -355,17 +364,19 @@ export default function AdminPage() {
           </div>
 
           <div className="text-xs text-gray-400 font-semibold px-1">
-            {filteredUsers.length} usuario{filteredUsers.length !== 1 ? 's' : ''}
+            {filteredUsers.length} usuario{filteredUsers.length !== 1 ? 's' : ''} encontrado{filteredUsers.length !== 1 ? 's' : ''}
           </div>
 
           {filteredUsers.length === 0 ? (
             <div className="card text-center py-12">
               <Users size={40} className="text-orange-200 mx-auto mb-3" />
               <p className="font-display font-bold text-lg text-orange-400">Sin usuarios</p>
+              <p className="text-gray-400 text-sm mt-1">
+                {userSearch ? 'No hay resultados para esa búsqueda.' : 'No hay usuarios registrados aún.'}
+              </p>
             </div>
           ) : (
             <div className="card overflow-hidden p-0">
-              {/* Table: scrollable horizontally on mobile */}
               <div className="overflow-x-auto">
                 <table className="w-full text-sm min-w-[520px]">
                   <thead>
@@ -455,7 +466,7 @@ export default function AdminPage() {
                     </p>
                     {vr.created_at && (
                       <p className="text-xs text-gray-400 mt-0.5">
-                        {formatDistanceToNow(new Date(vr.created_at), { locale: es, addSuffix: true })}
+                        Solicitado {formatDistanceToNow(new Date(vr.created_at), { locale: es, addSuffix: true })}
                       </p>
                     )}
                   </div>
@@ -471,10 +482,9 @@ export default function AdminPage() {
                   </button>
                   <button onClick={() => handleReview(vr.id, 'approve')}
                     className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-green-50 text-green-600 text-xs font-semibold hover:bg-green-100 transition-colors">
-                    <CheckCircle2 size={12} /> Aprobar
+                    <CheckCircle2 size={12} /> Aprobar verificación
                   </button>
-                  <button
-                    onClick={() => { const reason = window.prompt('Motivo de rechazo:') ?? ''; handleReview(vr.id, 'reject', reason) }}
+                  <button onClick={() => { const reason = window.prompt('Motivo de rechazo (opcional):') ?? ''; handleReview(vr.id, 'reject', reason) }}
                     className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-red-50 text-red-500 text-xs font-semibold hover:bg-red-100 transition-colors ml-auto">
                     <XCircle size={12} /> Rechazar
                   </button>
@@ -523,7 +533,7 @@ export default function AdminPage() {
               </label>
               <input type="text" value={rejectReason}
                 onChange={e => setRejectReason(e.target.value)}
-                placeholder="Ej: El código no es visible"
+                placeholder="Ej: El código no es visible en la imagen"
                 className="input w-full text-sm"
               />
             </div>
@@ -535,7 +545,7 @@ export default function AdminPage() {
               </button>
               <button onClick={() => handleReview(selfieModal.vr.id, 'approve')}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 text-white text-sm font-bold hover:bg-emerald-600 transition-colors shadow-sm">
-                <CheckCircle2 size={15} /> Aprobar
+                <CheckCircle2 size={15} /> Aprobar verificación
               </button>
             </div>
           </div>

@@ -9,6 +9,7 @@ import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-lea
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
+// Arreglo para los iconos de Leaflet
 delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -46,6 +47,7 @@ export default function EditProfilePage() {
     schedule: '', city: 'Asunción', lat: defaultLat, lng: defaultLng, is_looking: true,
   })
 
+  // Inicializar form cuando el perfil esté disponible
   useEffect(() => {
     if (!profile) return
     setForm({
@@ -89,19 +91,24 @@ export default function EditProfilePage() {
 
     setLoading(true)
     try {
+      let finalPhotoUrl = profile?.profile_photo_url
+
       if (photoFile) {
         setUploadingPhoto(true)
-        const photoUrl = await uploadProfilePhoto(photoFile)
+        finalPhotoUrl = await uploadProfilePhoto(photoFile)
         setUploadingPhoto(false)
-        setPhotoPreview(photoUrl)
+        setPhotoPreview(finalPhotoUrl)
         setPhotoFile(null)
       }
+
       const payload = {
         ...form,
+        profile_photo_url: finalPhotoUrl,
         age:        form.age ? parseInt(form.age) : null,
         budget_min: form.budget_min ? parseInt(form.budget_min) : null,
         budget_max: form.budget_max ? parseInt(form.budget_max) : null,
       }
+
       const { data } = await api.put('/profiles/me', payload)
       updateProfile(data.profile)
       toast.success('Perfil actualizado')
@@ -146,7 +153,7 @@ export default function EditProfilePage() {
 
       <form onSubmit={handleSubmit} className="card space-y-5 sm:space-y-6">
 
-        {/* Photo */}
+        {/* Foto de perfil */}
         <div className="flex flex-col items-center gap-3">
           <Label>Foto de perfil</Label>
           <div className="relative">
@@ -173,7 +180,7 @@ export default function EditProfilePage() {
           )}
         </div>
 
-        {/* Fields grid */}
+        {/* Cuadrícula de campos */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
           <div><Label>Nombre completo *</Label><input className="input" value={form.name} onChange={setField('name')} required /></div>
           <div><Label>Edad</Label><input className="input" type="number" min={18} max={80} value={form.age} onChange={setField('age')} /></div>
@@ -200,10 +207,10 @@ export default function EditProfilePage() {
           </div>
         </div>
 
-        {/* Map */}
+        {/* Mapa de ubicación */}
         <div>
           <Label>Ubicación en el mapa</Label>
-          <div className="rounded-xl overflow-hidden mt-1" style={{ height: '250px' }}>
+          <div className="rounded-xl overflow-hidden mt-1 border border-orange-100" style={{ height: '250px' }}>
             <MapContainer center={[form.lat, form.lng]} zoom={13} style={{ height: '100%', width: '100%' }}>
               <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
               <FlyToMarker lat={form.lat} lng={form.lng} />
@@ -212,11 +219,13 @@ export default function EditProfilePage() {
           </div>
         </div>
 
+        {/* Biografía */}
         <div>
           <Label>Bio</Label>
-          <textarea className="input h-24 sm:h-28 resize-none" value={form.bio} onChange={setField('bio')} />
+          <textarea className="input h-24 sm:h-28 resize-none" value={form.bio} onChange={setField('bio')} placeholder="Cuéntanos un poco sobre ti..." />
         </div>
 
+        {/* Presupuesto */}
         <div>
           <Label>Presupuesto mensual (₲)</Label>
           <div className="grid grid-cols-2 gap-3 sm:gap-4">
@@ -227,6 +236,7 @@ export default function EditProfilePage() {
           </div>
         </div>
 
+        {/* Preferencias y búsqueda */}
         <div>
           <Label>Preferencias</Label>
           <div className="flex flex-wrap gap-2 sm:gap-3 mt-2">
@@ -246,6 +256,7 @@ export default function EditProfilePage() {
           </div>
         </div>
 
+        {/* Acciones finales */}
         <div className="flex gap-3 justify-end pt-2 border-t border-orange-100">
           <button type="button" onClick={() => navigate('/profile')} className="btn-ghost text-sm">Cancelar</button>
           <button type="submit" disabled={loading} className="btn-primary text-sm">

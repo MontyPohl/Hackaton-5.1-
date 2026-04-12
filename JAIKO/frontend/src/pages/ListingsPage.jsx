@@ -22,15 +22,26 @@ const CITY_CENTERS = {
   'Ciudad del Este': [-25.5097, -54.611],
 };
 
+// Persistencia de ciudad en localStorage
+const getSavedCity = () => {
+  try { return localStorage.getItem('jaiko_listings_city') || 'Asunción' } catch { return 'Asunción' }
+}
+const saveCity = (city) => {
+  try { localStorage.setItem('jaiko_listings_city', city) } catch { }
+}
+
 export default function ListingsPage() {
   const { isAuthenticated } = useAuthStore();
   const [listings, setListings] = useState([]);
+  const [roomies, setRoomies] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [roomiesLoading, setRoomiesLoading] = useState(false);
   const [view, setView] = useState('grid');
   const [showFilters, setShowFilters] = useState(false);
+  const [JaikoMap, setJaikoMap] = useState(null);
 
   const [filters, setFilters] = useState({
-    city: 'Asunción',
+    city: getSavedCity(),
     min_price: '',
     max_price: '',
     pets_allowed: '',
@@ -38,6 +49,7 @@ export default function ListingsPage() {
     type: '',
   });
 
+  // ── Cargar listings según filtros ─────────────────────────────────────────
   useEffect(() => {
     const params = new URLSearchParams({ page: 1, per_page: 24, city: filters.city });
     if (filters.min_price) params.set('min_price', filters.min_price);
@@ -53,10 +65,41 @@ export default function ListingsPage() {
       .finally(() => setLoading(false));
   }, [filters]);
 
+  // ── Lazy-load JaikoMap ────────────────────────────────────────────────────
+  useEffect(() => {
+    if (view === 'map' && !JaikoMap) {
+      import('../components/map/JaikoMap').then(m => setJaikoMap(() => m.default))
+    }
+  }, [view, JaikoMap]);
+
+  // ── Roomies para el mapa ──────────────────────────────────────────────────
+  useEffect(() => {
+    if (view !== 'map') return;
+    if (!isAuthenticated()) { setRoomies([]); return; }
+    setRoomiesLoading(true);
+    getRoomies(filters.city)
+      .then(setRoomies)
+      .catch(() => setRoomies([]))
+      .finally(() => setRoomiesLoading(false));
+  }, [view, filters.city, isAuthenticated]);
+
+  const setCity = (city) => {
+    saveCity(city);
+    setFilters(f => ({ ...f, city }));
+  }
+
   const activeFilterCount = [
     filters.min_price, filters.max_price, filters.pets_allowed,
     filters.smoking_allowed, filters.type
   ].filter(Boolean).length;
+
+  const listingMarkers = listings
+    .filter(l => l.latitude != null && l.longitude != null && isFinite(l.latitude) && isFinite(l.longitude))
+    .map(l => ({ lat: l.latitude, lng: l.longitude, id: l.id, title: l.title, price: l.total_price, neighborhood: l.neighborhood }));
+
+  const roomiMarkers = roomies.filter(r => r?.lat != null && r?.lng != null && isFinite(r.lat) && isFinite(r.lng) && r.profile);
+
+  const mapCenter = CITY_CENTERS[filters.city] || [-25.2867, -57.647];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
@@ -113,7 +156,7 @@ export default function ListingsPage() {
             <select
               className="input"
               value={filters.city}
-              onChange={e => setFilters(f => ({ ...f, city: e.target.value }))}
+              onChange={e => setCity(e.target.value)}
             >
               {CITIES.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
@@ -134,24 +177,24 @@ export default function ListingsPage() {
           </div>
 
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Precio mín</label>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Precio mín (₲)</label>
             <input
-              type="number"
+              type="text" inputMode="numeric"
               className="input"
               value={filters.min_price}
               placeholder="0"
-              onChange={e => setFilters(f => ({ ...f, min_price: e.target.value }))}
+              onChange={e => setFilters(f => ({ ...f, min_price: e.target.value.replace(/[^0-9]/g, '') }))}
             />
           </div>
 
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Precio máx</label>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Precio máx (₲)</label>
             <input
-              type="number"
+              type="text" inputMode="numeric"
               className="input"
               value={filters.max_price}
               placeholder="Sin límite"
-              onChange={e => setFilters(f => ({ ...f, max_price: e.target.value }))}
+              onChange={e => setFilters(f => ({ ...f, max_price: e.target.value.replace(/[^0-9]/g, '') }))}
             />
           </div>
 
@@ -184,6 +227,33 @@ export default function ListingsPage() {
       {/* ── Content ───────────────────────────────────────────────────────── */}
       {loading ? (
         <div className="flex justify-center py-32"><Spinner size="lg" /></div>
+      ) : view === 'map' ? (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500">
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-full bg-blue-500" />
+              {listingMarkers.length} departamentos
+            </span>
+            {isAuthenticated() && (
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-full bg-orange-400" />
+                {roomiesLoading ? 'Cargando roomies...' : `${roomiMarkers.length} roomies compatibles`}
+              </span>
+            )}
+            {!isAuthenticated() && (
+              <span className="text-xs text-orange-400 italic">
+                Iniciá sesión para ver roomies compatibles en el mapa
+              </span>
+            )}
+          </div>
+          <div className="h-[600px] rounded-3xl overflow-hidden border border-slate-100 shadow-xl shadow-slate-200/50">
+            {JaikoMap ? (
+              <JaikoMap center={mapCenter} markers={roomiMarkers} listingMarkers={listingMarkers} height="600px" />
+            ) : (
+              <div className="flex justify-center items-center h-full bg-slate-50"><Spinner /></div>
+            )}
+          </div>
+        </div>
       ) : listings.length === 0 ? (
         <EmptyState icon="🏠" title="No hay publicaciones" description="Sé el primero en publicar en esta ciudad." />
       ) : (

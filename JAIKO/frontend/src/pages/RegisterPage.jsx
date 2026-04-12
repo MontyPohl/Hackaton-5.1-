@@ -3,7 +3,6 @@ import { useNavigate, Link } from "react-router-dom";
 import { Loader2, Eye, EyeOff, Home as HomeIcon, User, Mail, Lock } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { motion } from "motion/react";
-import ReCAPTCHA from "react-google-recaptcha";
 import useAuthStore from "../context/authStore";
 
 export default function RegisterPage() {
@@ -16,44 +15,68 @@ export default function RegisterPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [captchaToken, setCaptchaToken] = useState(null);
+
+  // Key de reCAPTCHA Enterprise
+  const SITE_KEY = "6LeFE54sAAAAANoCNMtlX1CWET8BuIg6zcy4XE-8";
 
   const handleRegister = async (e) => {
     e.preventDefault();
+
     if (!name || !email || !password || !confirmPassword) {
       toast.error("Completá todos los campos");
       return;
     }
-    if (!captchaToken) {
-      toast.error("¡Confirmá que no sos un robot!");
-      return;
-    }
+
     if (password.length < 6) {
       toast.error("La contraseña debe tener al menos 6 caracteres");
       return;
     }
+
     if (password !== confirmPassword) {
       toast.error("Las contraseñas no coinciden");
       return;
     }
 
     setLoading(true);
-    const result = await register({ name, email, password, captcha_token: captchaToken });
-    setLoading(false);
 
-    if (result.success) {
-      toast.success("¡Cuenta creada! Completá tu perfil");
-      navigate("/profile/edit");
-    } else {
-      toast.error(result.error || "Error al crear la cuenta");
-      if (window.grecaptcha) window.grecaptcha.reset();
-      setCaptchaToken(null);
+    // Lógica de reCAPTCHA Enterprise
+    const recaptcha = window.grecaptcha?.enterprise;
+
+    if (!recaptcha) {
+      toast.error("El sistema de seguridad no cargó. Refrescá con F5.");
+      setLoading(false);
+      return;
     }
+
+    recaptcha.ready(async () => {
+      try {
+        const token = await recaptcha.execute(SITE_KEY, { action: 'register' });
+
+        const result = await register({
+          name,
+          email,
+          password,
+          captcha_token: token
+        });
+
+        if (result.success) {
+          toast.success("¡Cuenta creada! Completá tu perfil");
+          navigate("/profile/edit");
+        } else {
+          toast.error(result.error || "Error al crear la cuenta");
+        }
+      } catch (error) {
+        console.error("Error reCAPTCHA:", error);
+        toast.error("Fallo en la validación de seguridad.");
+      } finally {
+        setLoading(false);
+      }
+    });
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50 relative overflow-hidden">
-      {/* Background elements */}
+      {/* Elementos de fondo decorativos */}
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-orange-500/10 blur-[120px] rounded-full" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-600/10 blur-[120px] rounded-full" />
 
@@ -89,6 +112,7 @@ export default function RegisterPage() {
           </div>
 
           <form onSubmit={handleRegister} className="space-y-5">
+            {/* Nombre */}
             <div className="space-y-2">
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Nombre completo</label>
               <div className="relative">
@@ -103,6 +127,7 @@ export default function RegisterPage() {
               </div>
             </div>
 
+            {/* Email */}
             <div className="space-y-2">
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Email</label>
               <div className="relative">
@@ -117,6 +142,7 @@ export default function RegisterPage() {
               </div>
             </div>
 
+            {/* Contraseña */}
             <div className="space-y-2">
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Contraseña</label>
               <div className="relative">
@@ -138,6 +164,7 @@ export default function RegisterPage() {
               </div>
             </div>
 
+            {/* Confirmar Contraseña */}
             <div className="space-y-2">
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Confirmar contraseña</label>
               <div className="relative">
@@ -152,26 +179,15 @@ export default function RegisterPage() {
               </div>
             </div>
 
-            <div className="flex justify-center py-2">
-              <ReCAPTCHA
-                sitekey="6Lc1R44sAAAAAMSJODZW1xsvID2xIMs7g-FUgXJU"
-                onChange={(token) => setCaptchaToken(token)}
-              />
-            </div>
-
             <button
               type="submit"
-              disabled={loading || !captchaToken}
-              className={`w-full py-4 rounded-2xl font-bold text-base transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg ${
-                !captchaToken 
-                ? "bg-slate-200 cursor-not-allowed text-slate-400" 
-                : "bg-orange-500 hover:bg-orange-600 text-white shadow-orange-500/20"
-              }`}
+              disabled={loading}
+              className={`w-full py-4 rounded-2xl font-bold text-base transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg bg-orange-500 hover:bg-orange-600 text-white shadow-orange-500/20 ${loading ? "opacity-70 cursor-not-allowed" : ""}`}
             >
               {loading ? (
                 <>
                   <Loader2 className="animate-spin" size={20} />
-                  Creando cuenta...
+                  Procesando...
                 </>
               ) : (
                 "CREAR CUENTA GRATIS"
