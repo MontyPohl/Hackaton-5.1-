@@ -21,11 +21,24 @@ def update_my_profile():
 
     data = request.get_json()
     allowed = [
-        "name", "age", "gender", "profession", "bio",
-        "budget_min", "budget_max", "pets", "smoker",
-        "schedule", "diseases", "city", "is_looking",
-        "lat", "lng",
-        "pref_min_age", "pref_max_age",
+        "name",
+        "age",
+        "gender",
+        "profession",
+        "bio",
+        "budget_min",
+        "budget_max",
+        "pets",
+        "smoker",
+        "schedule",
+        "diseases",
+        "city",
+        "is_looking",
+        "lat",
+        "lng",
+        "pref_min_age",
+        "pref_max_age",
+        "profile_photo_url",  # ← añadido: el frontend lo envía, el modelo lo tiene
     ]
     for field in allowed:
         if field in data:
@@ -66,12 +79,12 @@ def search_profiles():
     current_user = User.query.get_or_404(current_user_id)
     my_profile = current_user.profile
 
-    city          = request.args.get("city", "Asunción")
-    page          = int(request.args.get("page", 1))
-    per_page      = int(request.args.get("per_page", 20))
-    min_age       = request.args.get("min_age", type=int)
-    max_age       = request.args.get("max_age", type=int)
-    pets_filter   = _parse_bool(request.args.get("pets"))
+    city = request.args.get("city", "Asunción")
+    page = int(request.args.get("page", 1))
+    per_page = int(request.args.get("per_page", 20))
+    min_age = request.args.get("min_age", type=int)
+    max_age = request.args.get("max_age", type=int)
+    pets_filter = _parse_bool(request.args.get("pets"))
     smoker_filter = _parse_bool(request.args.get("smoker"))
     schedule_filter = request.args.get("schedule")
 
@@ -80,15 +93,11 @@ def search_profiles():
     # El frontend puede pasar ?min_score=80 si quiere el comportamiento antiguo.
     min_score = float(request.args.get("min_score", 50)) / 100.0
 
-    query = (
-        Profile.query
-        .join(User, User.id == Profile.user_id)
-        .filter(
-            Profile.user_id != current_user_id,
-            Profile.is_looking == True,
-            User.status == "active",
-            Profile.city == city,
-        )
+    query = Profile.query.join(User, User.id == Profile.user_id).filter(
+        Profile.user_id != current_user_id,
+        Profile.is_looking == True,
+        User.status == "active",
+        Profile.city == city,
     )
 
     # Filtros de edad del roomie buscado
@@ -135,13 +144,18 @@ def search_profiles():
     results.sort(key=lambda x: x["compatibility"], reverse=True)
 
     # Paginar DESPUÉS de filtrar (comportamiento correcto: página sobre resultados reales)
-    total  = len(results)
-    paged  = results[(page - 1) * per_page: page * per_page]
+    total = len(results)
+    paged = results[(page - 1) * per_page : page * per_page]
     has_more = (page * per_page) < total
 
-    return jsonify({
-        "profiles": paged,
-        "page": page,
-        "total": total,
-        "has_more": has_more,
-    }), 200
+    return (
+        jsonify(
+            {
+                "profiles": paged,
+                "page": page,
+                "total": total,
+                "has_more": has_more,
+            }
+        ),
+        200,
+    )

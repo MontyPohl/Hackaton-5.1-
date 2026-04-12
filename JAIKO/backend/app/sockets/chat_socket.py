@@ -98,22 +98,31 @@ def on_send_message(data):
         emit("error", {"message": "No sos miembro de este chat"})
         return
 
-    msg = Message(
-        chat_id=chat_id,
-        sender_id=user_id,
-        content=content,
-        type=data.get("type", "text"),
-    )
-    db.session.add(msg)
-    member.last_read_at = datetime.utcnow()
-    db.session.commit()
+    # ── try/except añadido ────────────────────────────────────────────────────
+    # Por qué: el handler global de Flask no intercepta excepciones de SocketIO.
+    # Si el commit falla (DB caída, timeout), sin este bloque el mensaje se pierde
+    # en silencio y la sesión queda en estado inválido para las siguientes queries.
+    # El rollback limpia la sesión; el emit("error") avisa al cliente para que
+    # pueda reintentar o mostrar un mensaje.
+    try:
+        msg = Message(
+            chat_id=chat_id,
+            sender_id=user_id,
+            content=content,
+            type=data.get("type", "text"),
+        )
+        db.session.add(msg)
+        member.last_read_at = datetime.utcnow()
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        emit("error", {"message": "No se pudo enviar el mensaje. Intentá de nuevo."})
+        return
 
     msg_dict = msg.to_dict()
 
-    # Emitir al room del chat (incluye al emisor)
     emit("receive_message", msg_dict, to=f"chat_{chat_id}")
 
-    # Emitir al room personal de cada miembro (por si no están en join_chat)
     chat = Chat.query.filter_by(id=chat_id).first()
     if not chat:
         return
@@ -122,22 +131,21 @@ def on_send_message(data):
         if cm.user_id != user_id:
             emit("receive_message", msg_dict, to=f"user_{cm.user_id}")
 
-    # FIX: notificación solo si el destinatario NO está activo en el chat
     sender_profile = msg.sender.profile
     sender_name = sender_profile.name if sender_profile else "Alguien"
 
     from ..services.notification_service import send_notification
+
     now = datetime.utcnow()
 
     for cm in chat.members:
         if cm.user_id == user_id:
             continue
-        # Si leyó en los últimos 30 segundos, probablemente tiene el chat abierto
         is_active = cm.last_read_at and (now - cm.last_read_at) < ACTIVE_THRESHOLD
         if not is_active:
             send_notification(
                 user_id=cm.user_id,
-                type="message",
+                notif_type="message",  # ← ya corregido en Punto 1
                 title=f"Nuevo mensaje de {sender_name}",
                 content=content[:100],
                 data={"chat_id": chat_id},

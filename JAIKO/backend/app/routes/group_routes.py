@@ -23,7 +23,12 @@ def list_groups():
         .limit(per_page)
         .all()
     )
-    return jsonify({"groups": [g.to_dict() for g in groups], "total": total, "page": page}), 200
+    return (
+        jsonify(
+            {"groups": [g.to_dict() for g in groups], "total": total, "page": page}
+        ),
+        200,
+    )
 
 
 # --- Crear grupo ---
@@ -52,7 +57,9 @@ def create_group():
     db.session.flush()
 
     # Creador entra como admin
-    member = GroupMember(group_id=group.id, user_id=user_id, role="admin", status="active")
+    member = GroupMember(
+        group_id=group.id, user_id=user_id, role="admin", status="active"
+    )
     db.session.add(member)
 
     # Crear chat grupal
@@ -73,14 +80,18 @@ def get_group(group_id):
     group_data = group.to_dict()
 
     # Incluir solicitudes pendientes
-    pending_members = GroupMember.query.filter_by(group_id=group_id, status="pending").all()
+    pending_members = GroupMember.query.filter_by(
+        group_id=group_id, status="pending"
+    ).all()
     group_data["join_requests"] = [
         {
             "id": m.id,
             "user": {
                 "id": m.user_id,
-                "profile": m.user.profile.to_dict() if m.user and m.user.profile else {}
-            }
+                "profile": (
+                    m.user.profile.to_dict() if m.user and m.user.profile else {}
+                ),
+            },
         }
         for m in pending_members
     ]
@@ -120,7 +131,7 @@ def join_group(group_id):
 
     send_notification(
         user_id=group.created_by,
-        type="group_invite",
+        notif_type="group_invite",
         title="Nuevo miembro en tu grupo",
         content=f"Alguien se unió a tu grupo {group.name}",
         data={"group_id": group_id},
@@ -152,25 +163,39 @@ def request_join_group(group_id):
         return jsonify({"error": f"No se pudo guardar la solicitud: {str(e)}"}), 500
 
     # Notificar a todos los miembros activos
-    active_members = GroupMember.query.filter_by(group_id=group_id, status="active").all()
+    active_members = GroupMember.query.filter_by(
+        group_id=group_id, status="active"
+    ).all()
     for m in active_members:
         send_notification(
             user_id=m.user_id,
-            type="join_request",
+            notif_type="join_request",
             title="Solicitud de ingreso al grupo",
             content=f"Un usuario quiere unirse a {group.name}",
             data={"group_id": group_id, "request_user_id": user_id},
         )
 
-    return jsonify({"message": "Solicitud enviada", "member": {"id": member.id, "status": member.status}}), 200
+    return (
+        jsonify(
+            {
+                "message": "Solicitud enviada",
+                "member": {"id": member.id, "status": member.status},
+            }
+        ),
+        200,
+    )
 
 
 # --- Aceptar solicitud ---
-@group_bp.route("/<int:group_id>/join-request/<int:request_id>/accept", methods=["POST"])
+@group_bp.route(
+    "/<int:group_id>/join-request/<int:request_id>/accept", methods=["POST"]
+)
 @jwt_required()
 def accept_join_request(group_id, request_id):
     user_id = int(get_jwt_identity())
-    admin = GroupMember.query.filter_by(group_id=group_id, user_id=user_id, role="admin", status="active").first()
+    admin = GroupMember.query.filter_by(
+        group_id=group_id, user_id=user_id, role="admin", status="active"
+    ).first()
     if not admin:
         return jsonify({"error": "Solo un admin puede aceptar solicitudes"}), 403
 
@@ -183,17 +208,19 @@ def accept_join_request(group_id, request_id):
 
     chat = Chat.query.filter_by(group_id=group_id).first()
     if chat:
-        if not ChatMember.query.filter_by(chat_id=chat.id, user_id=request_member.user_id).first():
+        if not ChatMember.query.filter_by(
+            chat_id=chat.id, user_id=request_member.user_id
+        ).first():
             db.session.add(ChatMember(chat_id=chat.id, user_id=request_member.user_id))
 
     db.session.commit()
 
     send_notification(
         user_id=request_member.user_id,
-        type="request_accepted",
+        notif_type="request_accepted",
         title=f"Aceptado en {group.name}",
         content="¡Fuiste agregado al grupo!",
-        data={"group_id": group_id}
+        data={"group_id": group_id},
     )
     return jsonify({"message": "Solicitud aceptada"}), 200
 
@@ -202,17 +229,16 @@ def accept_join_request(group_id, request_id):
 # BUG #3 CORREGIDO: se agregó Group.query.get_or_404(group_id) para definir
 # la variable 'group' antes de usarla en send_notification(). Sin esta línea,
 # Python lanzaba NameError en runtime al intentar leer group.name.
-@group_bp.route("/<int:group_id>/join-request/<int:request_id>/reject", methods=["POST"])
+@group_bp.route(
+    "/<int:group_id>/join-request/<int:request_id>/reject", methods=["POST"]
+)
 @jwt_required()
 def reject_join_request(group_id, request_id):
     user_id = int(get_jwt_identity())
 
     # 1. Verificar que quien rechaza es admin activo del grupo
     admin = GroupMember.query.filter_by(
-        group_id=group_id,
-        user_id=user_id,
-        role="admin",
-        status="active"
+        group_id=group_id, user_id=user_id, role="admin", status="active"
     ).first()
     if not admin:
         return jsonify({"error": "Solo un admin puede rechazar solicitudes"}), 403
@@ -228,10 +254,10 @@ def reject_join_request(group_id, request_id):
     # 4. Notificar al usuario rechazado (ahora group.name existe y no lanza error)
     send_notification(
         user_id=request_member.user_id,
-        type="request_rejected",
+        notif_type="request_rejected",
         title=f"Solicitud rechazada en {group.name}",
         content="Tu solicitud fue rechazada.",
-        data={"group_id": group_id}
+        data={"group_id": group_id},
     )
 
     return jsonify({"message": "Solicitud rechazada"}), 200
@@ -253,7 +279,9 @@ def leave_group(group_id):
 
     db.session.commit()
 
-    active_count = GroupMember.query.filter_by(group_id=group_id, status="active").count()
+    active_count = GroupMember.query.filter_by(
+        group_id=group_id, status="active"
+    ).count()
     if active_count == 0:
         chat = Chat.query.filter_by(group_id=group_id).first()
         if chat:

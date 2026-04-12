@@ -20,7 +20,10 @@ def create_request():
     listing_id = data.get("listing_id")
 
     if not target and not group_id and not listing_id:
-        return jsonify({"error": "target_user_id, group_id, o listing_id requerido"}), 400
+        return (
+            jsonify({"error": "target_user_id, group_id, o listing_id requerido"}),
+            400,
+        )
 
     # FIX: no permitir solicitud a uno mismo
     if target and target == user_id:
@@ -35,7 +38,10 @@ def create_request():
         status="pending",
     ).first()
     if existing:
-        return jsonify({"error": "Ya tenés una solicitud pendiente con este usuario"}), 409
+        return (
+            jsonify({"error": "Ya tenés una solicitud pendiente con este usuario"}),
+            409,
+        )
 
     req = RoommateRequest(
         sender_user_id=user_id,
@@ -52,7 +58,7 @@ def create_request():
     if target:
         send_notification(
             user_id=target,
-            type="match_request",
+            notif_type="match_request",
             title="Nueva solicitud de roomie",
             content="Alguien quiere ser tu roomie",
             data={"request_id": req.id, "sender_id": user_id},
@@ -107,7 +113,7 @@ def respond_request(req_id):
         # FIX: notificar al EMISOR que fue aceptado
         send_notification(
             user_id=sender.id,
-            type="request_accepted",
+            notif_type="request_accepted",
             title="¡Solicitud aceptada!",
             content=f"{receiver.profile.name} aceptó tu solicitud de roomie",
             data={
@@ -118,14 +124,19 @@ def respond_request(req_id):
         )
 
         # FIX: devolver el EMISOR como roommate (no el receiver)
-        return jsonify({
-            "message": "Solicitud aceptada",
-            "roommate": {
-                "id": sender.id,
-                "name": sender.profile.name,
-                "profile_photo_url": sender.profile.profile_photo_url,
-            },
-        }), 200
+        return (
+            jsonify(
+                {
+                    "message": "Solicitud aceptada",
+                    "roommate": {
+                        "id": sender.id,
+                        "name": sender.profile.name,
+                        "profile_photo_url": sender.profile.profile_photo_url,
+                    },
+                }
+            ),
+            200,
+        )
 
     else:
         req.status = "rejected"
@@ -134,7 +145,7 @@ def respond_request(req_id):
         # FIX: notificar al emisor que fue rechazado
         send_notification(
             user_id=sender.id,
-            type="request_rejected",
+            notif_type="request_rejected",
             title="Solicitud no aceptada",
             content=f"{receiver.profile.name} no aceptó tu solicitud",
             data={"request_id": req.id},
@@ -148,9 +159,11 @@ def respond_request(req_id):
 @jwt_required()
 def get_pending_requests():
     user_id = int(get_jwt_identity())
-    reqs = RoommateRequest.query.filter_by(
-        target_user_id=user_id, status="pending"
-    ).order_by(RoommateRequest.created_at.desc()).all()
+    reqs = (
+        RoommateRequest.query.filter_by(target_user_id=user_id, status="pending")
+        .order_by(RoommateRequest.created_at.desc())
+        .all()
+    )
     return jsonify({"requests": [r.to_dict() for r in reqs]}), 200
 
 
@@ -159,9 +172,11 @@ def get_pending_requests():
 @jwt_required()
 def get_sent_requests():
     user_id = int(get_jwt_identity())
-    reqs = RoommateRequest.query.filter_by(
-        sender_user_id=user_id
-    ).order_by(RoommateRequest.created_at.desc()).all()
+    reqs = (
+        RoommateRequest.query.filter_by(sender_user_id=user_id)
+        .order_by(RoommateRequest.created_at.desc())
+        .all()
+    )
     return jsonify({"requests": [r.to_dict() for r in reqs]}), 200
 
 

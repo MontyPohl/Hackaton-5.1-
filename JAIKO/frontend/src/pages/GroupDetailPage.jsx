@@ -21,7 +21,7 @@ export default function GroupDetailPage() {
 
   useEffect(() => {
     const loadGroup = api.get(`/groups/${id}`)
-    const loadMyGroups = api.get('/groups/my-groups').catch(() => ({ data: { groups: [] } }))
+    const loadMyGroups = api.get('/groups/my').catch(() => ({ data: { groups: [] } }))
 
     Promise.all([loadGroup, loadMyGroups])
       .then(([groupRes, myGroupsRes]) => {

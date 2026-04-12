@@ -1,7 +1,9 @@
 import os
-from flask import Flask
+from flask import Flask, jsonify  # ← añadí jsonify
+from werkzeug.exceptions import HTTPException  # ← añadí HTTPException
 from .config import config_map
-from .extensions import db, migrate, socketio, jwt, cors
+
+# ── Import duplicado eliminado (línea 312 era código muerto) ──
 from .extensions import db, migrate, socketio, jwt, cors, limiter
 
 
@@ -24,34 +26,15 @@ def create_app(env: str | None = None) -> Flask:
     socketio.init_app(app, cors_allowed_origins=allowed_origins, async_mode="eventlet")
 
     # ── Callbacks de JWT ──────────────────────────────────────────────────────
-    #
-    # token_in_blocklist_loader se ejecuta automáticamente en CADA petición
-    # que use @jwt_required(). Si retorna True, Flask-JWT-Extended rechaza
-    # el token con un 401 antes de que llegue a la función de la ruta.
-    #
-    # Esto resuelve dos problemas de una sola vez:
-    #
-    # 1. Logout real: cuando el usuario cierra sesión, su token se guarda en
-    #    TokenBlocklist. Las peticiones siguientes con ese token son rechazadas
-    #    aunque el token todavía no haya expirado.
-    #
-    # 2. Usuarios bloqueados: si un admin bloquea a un usuario, sus tokens
-    #    existentes dejan de funcionar en la próxima petición (máximo
-    #    segundos de demora), sin esperar los 7 días de expiración.
-    #
     @jwt.token_in_blocklist_loader
     def check_if_token_revoked(jwt_header, jwt_payload):
         from .models import TokenBlocklist, User
 
         jti = jwt_payload["jti"]
 
-        # Primero: ¿fue este token explícitamente revocado (logout)?
         if TokenBlocklist.query.filter_by(jti=jti).first():
             return True
 
-        # Segundo: ¿el usuario está bloqueado por el admin?
-        # Consultamos el estado actual del usuario en la DB en cada request.
-        # Si el admin bloquea al usuario, su próxima petición fallará aquí.
         user_id = int(jwt_payload["sub"])
         user = User.query.get(user_id)
         if user is None or user.is_blocked():
@@ -64,6 +47,37 @@ def create_app(env: str | None = None) -> Flask:
     def add_security_headers(response):
         response.headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
         return response
+
+    # ── Global error handler ──────────────────────────────────────────────────
+    #
+    # Por qué existe este handler:
+    # Sin él, cualquier excepción no controlada (DB caída, bug inesperado)
+    # le devuelve al frontend un traceback completo de Python con nombres de
+    # tablas, columnas y rutas internas del servidor — información que no
+    # debería ser pública.
+    #
+    # Cómo funciona:
+    # Flask llama a este handler ANTES de enviar cualquier respuesta 500.
+    # - Si el error es HTTP normal (404, 400, 401...) lo deja pasar sin tocar.
+    # - Si es cualquier otra excepción, loguea el detalle internamente,
+    #   hace rollback de la sesión de DB y devuelve un mensaje genérico.
+    #
+    # El rollback es importante: sin él, una sesión de SQLAlchemy que falló
+    # queda en estado inválido y las siguientes queries del mismo proceso
+    # también fallan en cascada.
+    @app.errorhandler(Exception)
+    def handle_unexpected_error(e):
+        if isinstance(e, HTTPException):
+            return e  # 404, 400, 401, etc. — Flask los maneja normalmente
+
+        app.logger.error("Error no controlado: %s", str(e), exc_info=True)
+        db.session.rollback()
+        return (
+            jsonify(
+                {"error": "Error interno del servidor. Por favor intentá más tarde."}
+            ),
+            500,
+        )
 
     # ── Blueprints ────────────────────────────────────────────────────────────
     from .routes.auth_routes import auth_bp

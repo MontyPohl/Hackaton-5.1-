@@ -9,13 +9,14 @@ Usage:
     url = upload_image(file_bytes, filename, bucket='profiles')
     signed = get_signed_url('verifications', 'verify_3_abc123.jpg', expires_in=3600)
 """
+
 import os
 from supabase import create_client, Client
 
 _client: Client | None = None
 
 # Buckets públicos — acceso directo por URL
-PUBLIC_BUCKETS  = {"profiles", "listings", "groups"}
+PUBLIC_BUCKETS = {"profiles", "listings", "groups"}
 # Bucket privado — requiere URL firmada
 PRIVATE_BUCKETS = {"verifications"}
 
@@ -23,16 +24,21 @@ PRIVATE_BUCKETS = {"verifications"}
 def _get_client(private: bool = False) -> Client:
     global _client
     url = os.environ.get("SUPABASE_URL")
-    
+
     if private:
-        # Service role key para buckets privados
         key = os.environ.get("SUPABASE_SERVICE_KEY")
-        if not key:
-            raise RuntimeError("SUPABASE_SERVICE_KEY must be set for private buckets")
+        # ── Validación añadida: url también puede ser None ────────────────────
+        # Antes solo se validaba key. Si SUPABASE_URL falta, create_client(None, key)
+        # lanza un error opaco de la librería que no dice qué variable configurar.
+        if not url or not key:
+            raise RuntimeError(
+                "SUPABASE_URL y SUPABASE_SERVICE_KEY deben estar configuradas "
+                "para acceder a buckets privados."
+            )
         return create_client(url, key)
-    
+
     # Anon key para buckets públicos
-    global _client
+    # ── global _client duplicado eliminado (era código muerto) ───────────────
     if _client is None:
         key = os.environ.get("SUPABASE_KEY")
         if not url or not key:

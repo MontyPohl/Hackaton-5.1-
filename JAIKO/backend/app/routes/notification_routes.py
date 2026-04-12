@@ -22,20 +22,24 @@ def get_notifications():
     unread = base_query.filter_by(read=False).count()
 
     notifs = (
-        base_query
-        .order_by(Notification.created_at.desc())
+        base_query.order_by(Notification.created_at.desc())
         .offset((page - 1) * per_page)
         .limit(per_page)
         .all()
     )
 
-    return jsonify({
-        "notifications": [n.to_dict() for n in notifs],
-        "unread": unread,
-        "total": total,
-        "page": page,
-        "has_more": (page * per_page) < total,
-    }), 200
+    return (
+        jsonify(
+            {
+                "notifications": [n.to_dict() for n in notifs],
+                "unread": unread,
+                "total": total,
+                "page": page,
+                "has_more": (page * per_page) < total,
+            }
+        ),
+        200,
+    )
 
 
 # ── MARCAR UNA NOTIFICACIÓN COMO LEÍDA ───────────────────────────────────────
@@ -81,7 +85,7 @@ def send_test_notification():
     user_id = int(get_jwt_identity())
     send_notification(
         user_id=user_id,
-        type="system",
+        notif_type="system",
         title="Prueba de notificación",
         content="Esta es una notificación de prueba",
         data={"example": True},
