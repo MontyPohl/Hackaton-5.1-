@@ -19,17 +19,51 @@ def create_app(env: str | None = None) -> Flask:
         resources={r"/api/*": {"origins": allowed_origins}},
         supports_credentials=True,
     )
-    socketio.init_app(
-        app,
-        cors_allowed_origins=allowed_origins,
-        async_mode='eventlet'
-    )
+    socketio.init_app(app, cors_allowed_origins=allowed_origins, async_mode="eventlet")
 
+    # ── Callbacks de JWT ──────────────────────────────────────────────────────
+    #
+    # token_in_blocklist_loader se ejecuta automáticamente en CADA petición
+    # que use @jwt_required(). Si retorna True, Flask-JWT-Extended rechaza
+    # el token con un 401 antes de que llegue a la función de la ruta.
+    #
+    # Esto resuelve dos problemas de una sola vez:
+    #
+    # 1. Logout real: cuando el usuario cierra sesión, su token se guarda en
+    #    TokenBlocklist. Las peticiones siguientes con ese token son rechazadas
+    #    aunque el token todavía no haya expirado.
+    #
+    # 2. Usuarios bloqueados: si un admin bloquea a un usuario, sus tokens
+    #    existentes dejan de funcionar en la próxima petición (máximo
+    #    segundos de demora), sin esperar los 7 días de expiración.
+    #
+    @jwt.token_in_blocklist_loader
+    def check_if_token_revoked(jwt_header, jwt_payload):
+        from .models import TokenBlocklist, User
+
+        jti = jwt_payload["jti"]
+
+        # Primero: ¿fue este token explícitamente revocado (logout)?
+        if TokenBlocklist.query.filter_by(jti=jti).first():
+            return True
+
+        # Segundo: ¿el usuario está bloqueado por el admin?
+        # Consultamos el estado actual del usuario en la DB en cada request.
+        # Si el admin bloquea al usuario, su próxima petición fallará aquí.
+        user_id = int(jwt_payload["sub"])
+        user = User.query.get(user_id)
+        if user is None or user.is_blocked():
+            return True
+
+        return False
+
+    # ── Security headers ──────────────────────────────────────────────────────
     @app.after_request
     def add_security_headers(response):
         response.headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
         return response
 
+    # ── Blueprints ────────────────────────────────────────────────────────────
     from .routes.auth_routes import auth_bp
     from .routes.profile_routes import profile_bp
     from .routes.listing_routes import listing_bp

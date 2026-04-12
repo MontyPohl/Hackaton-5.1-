@@ -2,7 +2,7 @@ import uuid
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from ..extensions import db
-from ..models import Profile, ListingPhoto, Listing, VerificationRequest
+from ..models import Profile, ListingPhoto, Listing, VerificationRequest, Group
 from ..utils.storage import upload_image
 
 upload_bp = Blueprint("upload", __name__)
@@ -11,6 +11,7 @@ ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
 
 
 def _get_ext(filename: str) -> str:
+    """Extrae la extensión del nombre de archivo en minúsculas."""
     return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
 
@@ -80,14 +81,17 @@ def upload_listing_photo(listing_id):
 
 
 # ── Foto de grupo ─────────────────────────────────────────────────────────────
+# BUG #5 CORREGIDO: se usaba group.owner_id pero el modelo Group no tiene ese
+# campo. El campo correcto es group.created_by (definido en models/group.py).
+# También se movió el import de Group al bloque de imports del archivo (arriba),
+# en lugar de tenerlo dentro de la función — es más limpio y es la convención.
 @upload_bp.route("/group/<int:group_id>/photo", methods=["POST"])
 @jwt_required()
 def upload_group_photo(group_id):
-    from ..models import Group
     user_id = int(get_jwt_identity())
     group   = Group.query.get_or_404(group_id)
 
-    if group.owner_id != user_id:
+    if group.created_by != user_id:  # ← BUG #5: era group.owner_id (no existe)
         return jsonify({"error": "Forbidden"}), 403
 
     if "file" not in request.files:
