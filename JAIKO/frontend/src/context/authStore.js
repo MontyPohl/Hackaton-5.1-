@@ -54,7 +54,11 @@ const useAuthStore = create((set, get) => ({
       return { success: true }
     } catch (err) {
       set({ loading: false })
-      return { success: false, error: err.response?.data?.error }
+      // Si el servidor devuelve 429, es rate limiting — mostramos mensaje claro
+      const mensaje = err.response?.status === 429
+        ? 'Demasiados intentos. Esperá un minuto e intentá de nuevo.'
+        : err.response?.data?.error
+      return { success: false, error: mensaje }
     }
   },
 
@@ -74,7 +78,11 @@ const useAuthStore = create((set, get) => ({
       return { success: true, role: data.user?.role }
     } catch (err) {
       set({ loading: false })
-      return { success: false, error: err.response?.data?.error }
+      // Si el servidor devuelve 429, es rate limiting — mostramos mensaje claro
+      const mensaje = err.response?.status === 429
+        ? 'Demasiados intentos. Esperá un minuto e intentá de nuevo.'
+        : err.response?.data?.error
+      return { success: false, error: mensaje }
     }
   },
 

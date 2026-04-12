@@ -2,6 +2,7 @@ import os
 from flask import Flask
 from .config import config_map
 from .extensions import db, migrate, socketio, jwt, cors
+from .extensions import db, migrate, socketio, jwt, cors, limiter
 
 
 def create_app(env: str | None = None) -> Flask:
@@ -14,6 +15,7 @@ def create_app(env: str | None = None) -> Flask:
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)
+    limiter.init_app(app)
     cors.init_app(
         app,
         resources={r"/api/*": {"origins": allowed_origins}},

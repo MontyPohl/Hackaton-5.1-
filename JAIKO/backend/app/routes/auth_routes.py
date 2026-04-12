@@ -12,6 +12,7 @@ from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from ..extensions import db
 from ..models import User, Profile, TokenBlocklist
+from ..extensions import db, limiter
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -47,6 +48,7 @@ def validar_captcha(token):
 
 
 @auth_bp.route("/register", methods=["POST"])
+@limiter.limit("5 per minute")
 def register():
     data = request.get_json()
     captcha_token = data.get("captcha_token")
@@ -90,6 +92,7 @@ def register():
 
 
 @auth_bp.route("/login", methods=["POST"])
+@limiter.limit("10 per minute")
 def login():
     data = request.get_json()
     user = User.query.filter_by(email=data.get("email")).first()
