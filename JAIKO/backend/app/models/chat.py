@@ -2,23 +2,42 @@ from datetime import datetime
 from ..extensions import db
 from typing import Optional
 
+
 class Chat(db.Model):
     __tablename__ = "chats"
 
     id = db.Column(db.Integer, primary_key=True)
-    type = db.Column(db.String(20), nullable=False, default="private")  # private | group | listing
+    type = db.Column(
+        db.String(20), nullable=False, default="private"
+    )  # private | group | listing
     group_id = db.Column(db.Integer, db.ForeignKey("groups.id"), nullable=True)
     listing_id = db.Column(db.Integer, db.ForeignKey("listings.id"), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    members = db.relationship("ChatMember", back_populates="chat", cascade="all, delete-orphan")
-    messages = db.relationship("Message", back_populates="chat", cascade="all, delete-orphan",
-                               order_by="Message.created_at")
+    members = db.relationship(
+        "ChatMember", back_populates="chat", cascade="all, delete-orphan"
+    )
+    messages = db.relationship(
+        "Message",
+        back_populates="chat",
+        cascade="all, delete-orphan",
+        order_by="Message.created_at",
+    )
 
     def get_last_message(self):
-        if self.messages:
-            return self.messages[-1].to_dict()
-        return None
+        """
+        Obtiene el último mensaje con una query directa (LIMIT 1).
+        Por qué NO usamos self.messages[-1]:
+        Eso carga TODOS los mensajes del chat en RAM para quedarse solo
+        con el último — ineficiente cuando el historial crece.
+        Con .order_by().first() la DB hace el trabajo con su índice.
+        """
+        msg = (
+            Message.query.filter_by(chat_id=self.id)
+            .order_by(Message.created_at.desc())
+            .first()
+        )
+        return msg.to_dict() if msg else None
 
     def to_dict(self, user_id: Optional[int] = None) -> dict:
         return {
@@ -61,7 +80,7 @@ class Message(db.Model):
     chat_id = db.Column(db.Integer, db.ForeignKey("chats.id"), nullable=False)
     sender_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     content = db.Column(db.Text, nullable=False)
-    type = db.Column(db.String(20), default="text")     # text | image | system
+    type = db.Column(db.String(20), default="text")  # text | image | system
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     chat = db.relationship("Chat", back_populates="messages")

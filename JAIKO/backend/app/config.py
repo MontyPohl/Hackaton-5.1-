@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 # Obtiene la ruta absoluta de la carpeta donde está este archivo
 basedir = os.path.abspath(os.path.dirname(__file__))
 # Carga el .env forzando la ruta para evitar errores de lectura
-load_dotenv(os.path.join(basedir, '..', '.env'))
+load_dotenv(os.path.join(basedir, "..", ".env"))
 
 
 def _require_env(name: str) -> str:
@@ -39,15 +39,13 @@ class Config:
 
     # ── Base de datos ─────────────────────────────────────────────────────────
     SQLALCHEMY_DATABASE_URI = os.environ.get(
-        "DATABASE_URL",
-        f"sqlite:///{os.path.join(basedir, 'jaiko_dev.db')}"
+        "DATABASE_URL", f"sqlite:///{os.path.join(basedir, 'jaiko_dev.db')}"
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # ── Google OAuth ──────────────────────────────────────────────────────────
-    GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "TU_CLIENT_ID_AQUI")
-    GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "TU_CLIENT_SECRET_AQUI")
-
+    GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+    GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
     # ── Frontend URL para redirección ─────────────────────────────────────────
     FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
 

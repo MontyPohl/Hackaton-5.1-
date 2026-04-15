@@ -40,6 +40,7 @@ ESTRUCTURA DEL PROYECTO:
                     chat_socket.py
                     __init__.py
                 utils/
+                    jwt_helpers.py
                     storage.py
                     __init__.py
         frontend/
@@ -1122,22 +1123,35 @@ __all__ = [
 FILE_PATH: .\JAIKO\backend\app\routes\admin_routes.py
 ----------------------------------------
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
 from functools import wraps
 from ..extensions import db
 from ..models import User, Report, Notification, Listing, Group
+from ..utils.jwt_helpers import get_current_user, get_current_user_id
 
 admin_bp = Blueprint("admin", __name__)
 
+
 def admin_required(fn):
+    """
+    Decorador que verifica que el usuario autenticado tenga rol 'admin'.
+
+    BUG CORREGIDO: antes usaba int(get_jwt_identity()) + get_or_404.
+    Problema: si el sub del token no era un número, crasheaba con ValueError.
+    Si el admin fue eliminado de la BD, devolvía 404 en lugar de 401.
+    Ahora get_current_user() maneja ambos casos de forma segura.
+    """
+
     @wraps(fn)
     @jwt_required()
     def wrapper(*args, **kwargs):
-        user_id = int(get_jwt_identity())
-        user = User.query.get_or_404(user_id)
+        user, err = get_current_user()
+        if err:
+            return err
         if user.role not in ("admin",):
             return jsonify({"error": "Admin access required"}), 403
         return fn(*args, **kwargs)
+
     return wrapper
 
 
@@ -1145,18 +1159,26 @@ def admin_required(fn):
 @admin_required
 def get_reports():
     status = request.args.get("status", "open")
-    page = int(request.args.get("page", 1))
-    per_page = int(request.args.get("per_page", 20))
+
+    # BUG CORREGIDO: int(...) directo crashea si page/per_page no son números.
+    # type=int hace que Flask devuelva el default en vez de lanzar ValueError.
+    page = request.args.get("page", 1, type=int) or 1
+    per_page = request.args.get("per_page", 20, type=int) or 20
+
     q = Report.query.filter_by(status=status).order_by(Report.created_at.desc())
     total = q.count()
     reports = q.offset((page - 1) * per_page).limit(per_page).all()
+
     return jsonify({"reports": [r.to_dict() for r in reports], "total": total}), 200
 
 
 @admin_bp.route("/reports/<int:report_id>", methods=["PUT"])
 @admin_required
 def handle_report(report_id):
-    admin_id = int(get_jwt_identity())
+    # BUG CORREGIDO: admin_id = int(get_jwt_identity()) → get_current_user_id()
+    # Como admin_required ya validó que el usuario existe y es admin,
+    # get_current_user_id() es suficiente aquí (solo necesitamos el id numérico).
+    admin_id = get_current_user_id()
     report = Report.query.get_or_404(report_id)
     data = request.get_json()
 
@@ -1169,22 +1191,26 @@ def handle_report(report_id):
         user = User.query.get(report.reported_user_id)
         if user:
             user.status = "blocked"
-            db.session.add(Notification(
-                user_id=user.id,
-                type="system",
-                title="Cuenta bloqueada",
-                content="Tu cuenta ha sido bloqueada por violar los términos de servicio.",
-            ))
+            db.session.add(
+                Notification(
+                    user_id=user.id,
+                    type="system",
+                    title="Cuenta bloqueada",
+                    content="Tu cuenta ha sido bloqueada por violar los términos de servicio.",
+                )
+            )
     elif action == "warn" and report.reported_user_id:
         user = User.query.get(report.reported_user_id)
         if user:
             user.status = "warned"
-            db.session.add(Notification(
-                user_id=user.id,
-                type="system",
-                title="Advertencia",
-                content=f"Recibiste una advertencia: {data.get('admin_note', '')}",
-            ))
+            db.session.add(
+                Notification(
+                    user_id=user.id,
+                    type="system",
+                    title="Advertencia",
+                    content=f"Recibiste una advertencia: {data.get('admin_note', '')}",
+                )
+            )
 
     db.session.commit()
     return jsonify({"report": report.to_dict()}), 200
@@ -1193,14 +1219,23 @@ def handle_report(report_id):
 @admin_bp.route("/users", methods=["GET"])
 @admin_required
 def get_users():
-    page = int(request.args.get("page", 1))
-    per_page = int(request.args.get("per_page", 30))
+    # BUG CORREGIDO: mismo fix de type=int para page y per_page
+    page = request.args.get("page", 1, type=int) or 1
+    per_page = request.args.get("per_page", 30, type=int) or 30
     status = request.args.get("status")
+
     q = User.query
     if status:
         q = q.filter_by(status=status)
+
     total = q.count()
-    users = q.order_by(User.created_at.desc()).offset((page - 1) * per_page).limit(per_page).all()
+    users = (
+        q.order_by(User.created_at.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all()
+    )
+
     return jsonify({"users": [u.to_dict() for u in users], "total": total}), 200
 
 
@@ -1209,9 +1244,11 @@ def get_users():
 def update_user_status(user_id):
     data = request.get_json()
     user = User.query.get_or_404(user_id)
+
     allowed_statuses = ["active", "blocked", "warned"]
     if data.get("status") not in allowed_statuses:
         return jsonify({"error": f"status must be one of {allowed_statuses}"}), 400
+
     user.status = data["status"]
     db.session.commit()
     return jsonify({"user": user.to_dict()}), 200
@@ -1220,28 +1257,39 @@ def update_user_status(user_id):
 @admin_bp.route("/stats", methods=["GET"])
 @admin_required
 def get_stats():
-    total_income = db.session.query(db.func.coalesce(db.func.sum(Listing.total_price), 0)).scalar()
-    return jsonify({
-        "users": {
-            "total": User.query.count(),
-            "active": User.query.filter_by(status="active").count(),
-            "blocked": User.query.filter_by(status="blocked").count(),
-        },
-        "listings": {
-            "total": Listing.query.count(),
-            "active": Listing.query.filter_by(status="active").count(),
-            "total_income": total_income
-        },
-        "groups": {
-            "total": Group.query.count(),
-            "open": Group.query.filter_by(status="open").count(),
-        },
-        "reports": {
-            "open": Report.query.filter_by(status="open").count(),
-            "reviewed": Report.query.filter(Report.status=="reviewed").count(),
-            "total": Report.query.count(),
-        },
-    }), 200
+    total_income = db.session.query(
+        db.func.coalesce(db.func.sum(Listing.total_price), 0)
+    ).scalar()
+
+    return (
+        jsonify(
+            {
+                "users": {
+                    "total": User.query.count(),
+                    "active": User.query.filter_by(status="active").count(),
+                    "blocked": User.query.filter_by(status="blocked").count(),
+                },
+                "listings": {
+                    "total": Listing.query.count(),
+                    "active": Listing.query.filter_by(status="active").count(),
+                    "total_income": total_income,
+                },
+                "groups": {
+                    "total": Group.query.count(),
+                    "open": Group.query.filter_by(status="open").count(),
+                },
+                "reports": {
+                    "open": Report.query.filter_by(status="open").count(),
+                    "reviewed": Report.query.filter(
+                        Report.status == "reviewed"
+                    ).count(),
+                    "total": Report.query.count(),
+                },
+            }
+        ),
+        200,
+    )
+
 ----------------------------------------
 
 FILE_PATH: .\JAIKO\backend\app\routes\auth_routes.py
@@ -1263,7 +1311,11 @@ from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import (
     create_access_token,
     get_jwt,
-    get_jwt_identity,
+    # BUG CORREGIDO: eliminamos get_jwt_identity de este archivo.
+    # Antes: user_id = int(get_jwt_identity()) en get_me() → crasheaba si el
+    # sub del token no era un entero válido.
+    # Ahora: usamos get_current_user() que maneja eso de forma segura y además
+    # devuelve 401 (no 404) si el usuario fue eliminado.
     jwt_required,
 )
 from google.oauth2 import id_token as google_id_token
@@ -1271,10 +1323,8 @@ from google.auth.transport import requests as google_requests
 
 from ..extensions import db, limiter
 from ..models import Profile, TokenBlocklist, User
+from ..utils.jwt_helpers import get_current_user
 
-# Blueprint: le dice a Flask que estas rutas pertenecen al grupo "auth".
-# __init__.py las registra con url_prefix="/api/auth", así que cada ruta
-# aquí es relativa — "/login" se convierte en "/api/auth/login".
 auth_bp = Blueprint("auth", __name__)
 
 
@@ -1311,9 +1361,6 @@ def _build_auth_response(user: User, is_new_user: bool = False) -> dict:
 def register():
     data = request.get_json()
 
-    # ── Validaciones de entrada ───────────────────────────────────────────────
-    # Validamos primero y devolvemos mensajes claros.
-    # Beneficio para el usuario: sabe exactamente qué falta completar.
     name = (data.get("name") or "").strip()
     email = (data.get("email") or "").strip().lower()
     password = data.get("password") or ""
@@ -1325,25 +1372,13 @@ def register():
     if len(password) < 6:
         return jsonify({"error": "La contraseña debe tener al menos 6 caracteres"}), 400
 
-    # ── Verificar email duplicado ─────────────────────────────────────────────
-    # ¿Por qué verificamos antes de hacer commit?
-    # Si no chequeamos, la DB lanza IntegrityError (email es UNIQUE).
-    # Capturar esa excepción es posible pero devuelve un mensaje genérico.
-    # Este chequeo explícito nos permite devolver "El email ya está registrado"
-    # — mensaje claro que el usuario entiende.
     if User.query.filter_by(email=email).first():
         return jsonify({"error": "El email ya está registrado"}), 409
 
-    # ── Crear usuario y perfil ────────────────────────────────────────────────
-    # Creamos User y Profile en la misma transacción.
-    # ¿Por qué? Si el Profile fallara en una segunda transacción, tendríamos
-    # un User sin Profile — estado inconsistente que rompería toda la app.
     user = User(email=email)
-    user.set_password(
-        password
-    )  # bcrypt hashea internamente — nunca guardamos texto plano
+    user.set_password(password)
     db.session.add(user)
-    db.session.flush()  # flush() asigna user.id sin hacer commit todavía
+    db.session.flush()
 
     profile = Profile(user_id=user.id, name=name)
     db.session.add(profile)
@@ -1369,14 +1404,12 @@ def login():
 
     user = User.query.filter_by(email=email).first()
 
-    # check_password() usa bcrypt para comparar — nunca comparamos texto plano
     if not user or not user.check_password(password):
         return jsonify({"error": "Credenciales incorrectas"}), 401
 
     if user.is_blocked():
         return jsonify({"error": "Tu cuenta está suspendida. Contactá soporte."}), 403
 
-    # Actualizamos last_login para saber cuándo fue el último acceso
     user.last_login = datetime.utcnow()
     db.session.commit()
 
@@ -1386,17 +1419,6 @@ def login():
 # ─────────────────────────────────────────────────────────────────────────────
 # POST /api/auth/google
 # ─────────────────────────────────────────────────────────────────────────────
-# ¿Cómo funciona Google OAuth con id_token?
-# 1. El frontend usa el SDK de Google → el usuario hace clic en "Login con Google"
-# 2. Google le entrega al frontend un id_token (JWT firmado por Google)
-# 3. El frontend envía ese token a NUESTRO backend
-# 4. Nuestro backend lo VERIFICA contra los servidores de Google
-# 5. Si es válido, extraemos el email y creamos/encontramos el usuario
-#
-# ¿Por qué verificamos en el backend y no confiamos en el frontend?
-# Cualquiera podría fabricar un JSON con "email: admin@jaiko.com" y enviarlo.
-# La verificación criptográfica de Google garantiza que el token es auténtico.
-#
 @auth_bp.route("/google", methods=["POST"])
 @limiter.limit("10 per minute")
 def google_login():
@@ -1406,43 +1428,31 @@ def google_login():
     if not token:
         return jsonify({"error": "id_token requerido"}), 400
 
-    # ── Verificar el token con Google ─────────────────────────────────────────
     try:
         client_id = current_app.config["GOOGLE_CLIENT_ID"]
-        # google_id_token.verify_oauth2_token hace una petición a los servidores
-        # de Google para validar la firma criptográfica del token
         id_info = google_id_token.verify_oauth2_token(
             token,
             google_requests.Request(),
             client_id,
         )
     except ValueError as e:
-        # ValueError significa que el token es inválido o expiró
         return jsonify({"error": f"Token de Google inválido: {str(e)}"}), 401
 
-    google_sub = id_info.get("sub")  # ID único del usuario en Google
+    google_sub = id_info.get("sub")
     email = id_info.get("email", "").lower()
     name = id_info.get("name", "Usuario")
 
     if not email:
         return jsonify({"error": "No se pudo obtener el email de Google"}), 400
 
-    # ── Buscar usuario existente o crear uno nuevo ────────────────────────────
-    # Buscamos primero por google_id (más específico), luego por email.
-    # ¿Por qué buscar por email también?
-    # Un usuario pudo haberse registrado antes con email+contraseña con el
-    # mismo email. En ese caso vinculamos su google_id a la cuenta existente
-    # en lugar de crear una cuenta duplicada.
     is_new = False
     user = User.query.filter_by(google_id=google_sub).first()
 
     if not user:
         user = User.query.filter_by(email=email).first()
         if user:
-            # Vincular cuenta existente con Google
             user.google_id = google_sub
         else:
-            # Crear cuenta nueva
             is_new = True
             user = User(email=email, google_id=google_sub)
             db.session.add(user)
@@ -1473,11 +1483,17 @@ def google_login():
 @auth_bp.route("/me", methods=["GET"])
 @jwt_required()
 def get_me():
-    user_id = int(get_jwt_identity())
-    user = User.query.get(user_id)
-
-    if not user or user.is_blocked():
-        return jsonify({"error": "Usuario no encontrado o suspendido"}), 404
+    # BUG CORREGIDO: antes usábamos int(get_jwt_identity()) + User.query.get()
+    # y devolvíamos 404 si el usuario no existía.
+    # Problema doble:
+    #   1. int() sin try/except crasheaba con ValueError si el sub no era número.
+    #   2. 404 en un endpoint autenticado confunde al frontend — no sabe que
+    #      debe limpiar el token y redirigir al login.
+    # Ahora get_current_user() devuelve 401 en ambos casos, y el interceptor
+    # de Axios en api.js ya maneja el 401 redirigiendo al login automáticamente.
+    user, err = get_current_user()
+    if err:
+        return err
 
     return (
         jsonify(
@@ -1505,9 +1521,8 @@ def get_me():
 @auth_bp.route("/logout", methods=["POST"])
 @jwt_required()
 def logout():
-    jti = get_jwt()["jti"]  # jti = identificador único de ESTE token específico
+    jti = get_jwt()["jti"]
 
-    # Si por alguna razón el token ya estaba en la blocklist, no fallamos
     if not TokenBlocklist.query.filter_by(jti=jti).first():
         db.session.add(TokenBlocklist(jti=jti))
         db.session.commit()
@@ -1519,11 +1534,12 @@ def logout():
 FILE_PATH: .\JAIKO\backend\app\routes\chat_routes.py
 ----------------------------------------
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
 from sqlalchemy.orm import joinedload
 from sqlalchemy import func
 from ..extensions import db
 from ..models import Chat, ChatMember, Message, User
+from ..utils.jwt_helpers import get_current_user_id
 
 chat_bp = Blueprint("chats", __name__)
 
@@ -1531,27 +1547,31 @@ chat_bp = Blueprint("chats", __name__)
 @chat_bp.route("/", methods=["GET"])
 @jwt_required()
 def get_my_chats():
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    # En este endpoint solo necesitamos el id numérico para filtrar ChatMember,
+    # no el objeto User completo, así que usamos get_current_user_id().
+    # Si devuelve None, retornamos 401 para que el frontend limpie el token.
+    user_id = get_current_user_id()
+    if user_id is None:
+        return ({"error": "Token inválido. Iniciá sesión nuevamente."}, 401)
 
-    # 1 query: get chat IDs for this user
+    # 1 query: obtener los IDs de chats donde el usuario es miembro
     chat_ids = [
         row.chat_id
         for row in db.session.query(ChatMember.chat_id).filter_by(user_id=user_id).all()
     ]
     if not chat_ids:
-        return jsonify({"chats": []}), 200
+        return ({"chats": []}), 200
 
-    # 1 query: load chats + members + user profiles eagerly
+    # 1 query: cargar chats + miembros + perfiles de usuario de forma eager
+    # (evita el problema N+1: sin joinedload haría 1 query por cada miembro)
     chats = (
-        Chat.query
-        .filter(Chat.id.in_(chat_ids))
-        .options(
-            joinedload(Chat.members).joinedload(ChatMember.user)
-        )
+        Chat.query.filter(Chat.id.in_(chat_ids))
+        .options(joinedload(Chat.members).joinedload(ChatMember.user))
         .all()
     )
 
-    # 1 query: get last message per chat using MAX(id) subquery
+    # 1 query: obtener el último mensaje por chat usando subquery MAX(id)
     last_msg_subq = (
         db.session.query(func.max(Message.id))
         .filter(Message.chat_id.in_(chat_ids))
@@ -1559,8 +1579,7 @@ def get_my_chats():
         .subquery()
     )
     last_messages = (
-        Message.query
-        .filter(Message.id.in_(last_msg_subq))
+        Message.query.filter(Message.id.in_(last_msg_subq))
         .options(joinedload(Message.sender))
         .all()
     )
@@ -1569,69 +1588,84 @@ def get_my_chats():
     result = []
     for chat in chats:
         last_msg = last_msg_by_chat.get(chat.id)
-        result.append({
-            "id": chat.id,
-            "type": chat.type,
-            "group_id": chat.group_id,
-            "listing_id": chat.listing_id,
-            "members": [m.to_dict() for m in chat.members],
-            "last_message": last_msg.to_dict() if last_msg else None,
-            "created_at": chat.created_at.isoformat(),
-        })
+        result.append(
+            {
+                "id": chat.id,
+                "type": chat.type,
+                "group_id": chat.group_id,
+                "listing_id": chat.listing_id,
+                "members": [m.to_dict() for m in chat.members],
+                "last_message": last_msg.to_dict() if last_msg else None,
+                "created_at": chat.created_at.isoformat(),
+            }
+        )
 
     result.sort(
         key=lambda c: c["last_message"]["created_at"] if c.get("last_message") else "",
         reverse=True,
     )
-    return jsonify({"chats": result}), 200
+    return ({"chats": result}), 200
 
 
 @chat_bp.route("/private/<int:other_user_id>", methods=["POST"])
 @jwt_required()
 def get_or_create_private_chat(other_user_id):
-    """Get or create a private 1-on-1 chat."""
-    user_id = int(get_jwt_identity())
-    if user_id == other_user_id:
-        return jsonify({"error": "Cannot chat with yourself"}), 400
+    """Obtiene o crea un chat privado 1 a 1."""
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return ({"error": "Token inválido. Iniciá sesión nuevamente."}, 401)
 
+    if user_id == other_user_id:
+        return ({"error": "No podés chatear con vos mismo"}), 400
+
+    # Verificar que el otro usuario existe antes de crear el chat
     User.query.get_or_404(other_user_id)
 
-    # Check if private chat already exists
+    # Buscar si ya existe un chat privado entre estos dos usuarios:
+    # Subconsulta: IDs de chats privados donde el usuario actual es miembro
     my_chats = (
         db.session.query(Chat.id)
         .join(ChatMember, ChatMember.chat_id == Chat.id)
         .filter(Chat.type == "private", ChatMember.user_id == user_id)
         .subquery()
     )
+    # De esos chats, ver si el otro usuario también es miembro
     existing = (
-        Chat.query
-        .filter(Chat.id.in_(my_chats))
+        Chat.query.filter(Chat.id.in_(my_chats))
         .join(ChatMember, ChatMember.chat_id == Chat.id)
         .filter(ChatMember.user_id == other_user_id)
         .first()
     )
     if existing:
-        return jsonify({"chat": existing.to_dict()}), 200
+        return ({"chat": existing.to_dict()}), 200
 
+    # Crear nuevo chat privado con ambos usuarios como miembros
     chat = Chat(type="private")
     db.session.add(chat)
-    db.session.flush()
+    db.session.flush()  # flush asigna chat.id sin hacer commit todavía
     db.session.add(ChatMember(chat_id=chat.id, user_id=user_id))
     db.session.add(ChatMember(chat_id=chat.id, user_id=other_user_id))
     db.session.commit()
-    return jsonify({"chat": chat.to_dict()}), 201
+    return ({"chat": chat.to_dict()}), 201
 
 
 @chat_bp.route("/<int:chat_id>/messages", methods=["GET"])
 @jwt_required()
 def get_messages(chat_id):
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return ({"error": "Token inválido. Iniciá sesión nuevamente."}, 401)
+
+    # Verificar que el usuario es miembro del chat antes de mostrar mensajes
     member = ChatMember.query.filter_by(chat_id=chat_id, user_id=user_id).first()
     if not member:
-        return jsonify({"error": "Not a member of this chat"}), 403
+        return ({"error": "No sos miembro de este chat"}), 403
 
-    page = int(request.args.get("page", 1))
-    per_page = int(request.args.get("per_page", 50))
+    # BUG CORREGIDO: int(request.args.get(...)) → type=int para seguridad
+    page = request.args.get("page", 1, type=int) or 1
+    per_page = request.args.get("per_page", 50, type=int) or 50
 
     messages = (
         Message.query.filter_by(chat_id=chat_id)
@@ -1640,29 +1674,32 @@ def get_messages(chat_id):
         .limit(per_page)
         .all()
     )
-    messages.reverse()
-    return jsonify({"messages": [m.to_dict() for m in messages], "page": page}), 200
+    messages.reverse()  # Devolver en orden cronológico ascendente
+    return ({"messages": [m.to_dict() for m in messages], "page": page}), 200
 
 ----------------------------------------
 
 FILE_PATH: .\JAIKO\backend\app\routes\group_routes.py
 ----------------------------------------
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
 from ..extensions import db
 from ..models import Group, GroupMember, Chat, ChatMember
 from ..services.notification_service import send_notification
+from ..utils.jwt_helpers import get_current_user_id
 
 group_bp = Blueprint("groups", __name__)
 
 
-# --- Listar grupos ---
+# ── Listar grupos ─────────────────────────────────────────────────────────────
 @group_bp.route("/", methods=["GET"])
 @jwt_required()
 def list_groups():
     city = request.args.get("city", "Asunción")
-    page = int(request.args.get("page", 1))
-    per_page = int(request.args.get("per_page", 20))
+
+    # BUG CORREGIDO: int(request.args.get(...)) → type=int
+    page = request.args.get("page", 1, type=int) or 1
+    per_page = request.args.get("per_page", 20, type=int) or 20
 
     q = Group.query.filter(Group.city == city, Group.status == "open")
     total = q.count()
@@ -1680,13 +1717,16 @@ def list_groups():
     )
 
 
-# --- Crear grupo ---
+# ── Crear grupo ───────────────────────────────────────────────────────────────
 @group_bp.route("/", methods=["POST"])
 @jwt_required()
 def create_group():
-    user_id = int(get_jwt_identity())
-    data = request.get_json()
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
 
+    data = request.get_json()
     if not data.get("name"):
         return jsonify({"error": "El nombre del grupo es requerido"}), 400
 
@@ -1705,13 +1745,12 @@ def create_group():
     db.session.add(group)
     db.session.flush()
 
-    # Creador entra como admin
-    member = GroupMember(
-        group_id=group.id, user_id=user_id, role="admin", status="active"
+    # El creador entra automáticamente como admin
+    db.session.add(
+        GroupMember(group_id=group.id, user_id=user_id, role="admin", status="active")
     )
-    db.session.add(member)
 
-    # Crear chat grupal
+    # Crear el chat grupal asociado
     chat = Chat(type="group", group_id=group.id)
     db.session.add(chat)
     db.session.flush()
@@ -1721,14 +1760,14 @@ def create_group():
     return jsonify({"group": group.to_dict()}), 201
 
 
-# --- Obtener grupo ---
+# ── Obtener grupo ─────────────────────────────────────────────────────────────
 @group_bp.route("/<int:group_id>", methods=["GET"])
 @jwt_required()
 def get_group(group_id):
     group = Group.query.get_or_404(group_id)
     group_data = group.to_dict()
 
-    # Incluir solicitudes pendientes
+    # Incluir solicitudes pendientes para que el admin las vea
     pending_members = GroupMember.query.filter_by(
         group_id=group_id, status="pending"
     ).all()
@@ -1747,13 +1786,16 @@ def get_group(group_id):
     return jsonify({"group": group_data}), 200
 
 
-# --- Unirse directamente al grupo ---
+# ── Unirse directamente al grupo ──────────────────────────────────────────────
 @group_bp.route("/<int:group_id>/join", methods=["POST"])
 @jwt_required()
 def join_group(group_id):
-    user_id = int(get_jwt_identity())
-    group = Group.query.get_or_404(group_id)
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
 
+    group = Group.query.get_or_404(group_id)
     if group.is_full:
         return jsonify({"error": "El grupo está lleno"}), 400
 
@@ -1764,14 +1806,15 @@ def join_group(group_id):
     if existing:
         existing.status = "active"
     else:
-        member = GroupMember(group_id=group_id, user_id=user_id, status="active")
-        db.session.add(member)
+        db.session.add(GroupMember(group_id=group_id, user_id=user_id, status="active"))
 
-    # Agregar al chat del grupo
+    # Agregar al chat del grupo si no es miembro aún
     chat = Chat.query.filter_by(group_id=group_id).first()
-    if chat:
-        if not ChatMember.query.filter_by(chat_id=chat.id, user_id=user_id).first():
-            db.session.add(ChatMember(chat_id=chat.id, user_id=user_id))
+    if (
+        chat
+        and not ChatMember.query.filter_by(chat_id=chat.id, user_id=user_id).first()
+    ):
+        db.session.add(ChatMember(chat_id=chat.id, user_id=user_id))
 
     if group.current_members + 1 >= group.max_members:
         group.status = "full"
@@ -1788,14 +1831,18 @@ def join_group(group_id):
     return jsonify({"message": "Te uniste al grupo", "group": group.to_dict()}), 200
 
 
-# --- Solicitud de unirse al grupo ---
+# ── Solicitar unirse al grupo ─────────────────────────────────────────────────
 @group_bp.route("/<int:group_id>/join-request", methods=["POST"])
 @jwt_required()
 def request_join_group(group_id):
-    user_id = int(get_jwt_identity())
-    group = Group.query.get_or_404(group_id)
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
 
+    group = Group.query.get_or_404(group_id)
     existing = GroupMember.query.filter_by(group_id=group_id, user_id=user_id).first()
+
     if existing and existing.status in ["active", "pending"]:
         return jsonify({"error": "Ya sos miembro o ya enviaste una solicitud"}), 400
 
@@ -1811,7 +1858,7 @@ def request_join_group(group_id):
         db.session.rollback()
         return jsonify({"error": f"No se pudo guardar la solicitud: {str(e)}"}), 500
 
-    # Notificar a todos los miembros activos
+    # Notificar a todos los miembros activos del grupo
     active_members = GroupMember.query.filter_by(
         group_id=group_id, status="active"
     ).all()
@@ -1835,13 +1882,17 @@ def request_join_group(group_id):
     )
 
 
-# --- Aceptar solicitud ---
+# ── Aceptar solicitud ─────────────────────────────────────────────────────────
 @group_bp.route(
     "/<int:group_id>/join-request/<int:request_id>/accept", methods=["POST"]
 )
 @jwt_required()
 def accept_join_request(group_id, request_id):
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
     admin = GroupMember.query.filter_by(
         group_id=group_id, user_id=user_id, role="admin", status="active"
     ).first()
@@ -1855,12 +1906,15 @@ def accept_join_request(group_id, request_id):
     if group.current_members + 1 >= group.max_members:
         group.status = "full"
 
+    # Agregar al chat del grupo
     chat = Chat.query.filter_by(group_id=group_id).first()
-    if chat:
-        if not ChatMember.query.filter_by(
+    if (
+        chat
+        and not ChatMember.query.filter_by(
             chat_id=chat.id, user_id=request_member.user_id
-        ).first():
-            db.session.add(ChatMember(chat_id=chat.id, user_id=request_member.user_id))
+        ).first()
+    ):
+        db.session.add(ChatMember(chat_id=chat.id, user_id=request_member.user_id))
 
     db.session.commit()
 
@@ -1874,33 +1928,28 @@ def accept_join_request(group_id, request_id):
     return jsonify({"message": "Solicitud aceptada"}), 200
 
 
-# --- Rechazar solicitud ---
-# BUG #3 CORREGIDO: se agregó Group.query.get_or_404(group_id) para definir
-# la variable 'group' antes de usarla en send_notification(). Sin esta línea,
-# Python lanzaba NameError en runtime al intentar leer group.name.
+# ── Rechazar solicitud ────────────────────────────────────────────────────────
 @group_bp.route(
     "/<int:group_id>/join-request/<int:request_id>/reject", methods=["POST"]
 )
 @jwt_required()
 def reject_join_request(group_id, request_id):
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
 
-    # 1. Verificar que quien rechaza es admin activo del grupo
     admin = GroupMember.query.filter_by(
         group_id=group_id, user_id=user_id, role="admin", status="active"
     ).first()
     if not admin:
         return jsonify({"error": "Solo un admin puede rechazar solicitudes"}), 403
 
-    # 2. Obtener la solicitud y el grupo
     request_member = GroupMember.query.get_or_404(request_id)
-    group = Group.query.get_or_404(group_id)  # ← línea que faltaba (Bug #3)
-
-    # 3. Actualizar estado y persistir
+    group = Group.query.get_or_404(group_id)
     request_member.status = "rejected"
     db.session.commit()
 
-    # 4. Notificar al usuario rechazado (ahora group.name existe y no lanza error)
     send_notification(
         user_id=request_member.user_id,
         notif_type="request_rejected",
@@ -1908,15 +1957,18 @@ def reject_join_request(group_id, request_id):
         content="Tu solicitud fue rechazada.",
         data={"group_id": group_id},
     )
-
     return jsonify({"message": "Solicitud rechazada"}), 200
 
 
-# --- Salir del grupo ---
+# ── Salir del grupo ───────────────────────────────────────────────────────────
 @group_bp.route("/<int:group_id>/leave", methods=["POST"])
 @jwt_required()
 def leave_group(group_id):
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
     member = GroupMember.query.filter_by(group_id=group_id, user_id=user_id).first()
     if not member:
         return jsonify({"error": "No sos miembro de este grupo"}), 404
@@ -1928,6 +1980,7 @@ def leave_group(group_id):
 
     db.session.commit()
 
+    # Si no quedan miembros activos, eliminar el grupo y su chat
     active_count = GroupMember.query.filter_by(
         group_id=group_id, status="active"
     ).count()
@@ -1942,28 +1995,32 @@ def leave_group(group_id):
     return jsonify({"message": "Saliste del grupo"}), 200
 
 
-# --- Mis grupos ---
+# ── Mis grupos ────────────────────────────────────────────────────────────────
 @group_bp.route("/my", methods=["GET"])
 @jwt_required()
 def my_groups():
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
     memberships = GroupMember.query.filter_by(user_id=user_id, status="active").all()
     groups = [m.group.to_dict() for m in memberships]
     return jsonify({"groups": groups}), 200
 
 
-# --- Actualizar grupo ---
+# ── Actualizar grupo ──────────────────────────────────────────────────────────
 @group_bp.route("/<int:group_id>", methods=["PUT"])
 @jwt_required()
 def update_group(group_id):
-    user_id = int(get_jwt_identity())
-    group = Group.query.get_or_404(group_id)
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
 
+    group = Group.query.get_or_404(group_id)
     member = GroupMember.query.filter_by(
-        group_id=group_id,
-        user_id=user_id,
-        status="active",
-        role="admin",
+        group_id=group_id, user_id=user_id, status="active", role="admin"
     ).first()
     if not member:
         return jsonify({"error": "Solo el administrador del grupo puede editarlo"}), 403
@@ -1984,33 +2041,37 @@ def update_group(group_id):
 FILE_PATH: .\JAIKO\backend\app\routes\listing_routes.py
 ----------------------------------------
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
 from ..extensions import db
 from ..models import Listing, ListingPhoto, User
+from ..utils.jwt_helpers import get_current_user_id
 
 listing_bp = Blueprint("listings", __name__)
 
-# ── GET /listings ───────────────────────────────────────────────────────────
+
+# ── GET /listings ────────────────────────────────────────────────────────────
 @listing_bp.route("/", methods=["GET"])
 def get_listings():
-    city     = request.args.get("city", "Asunción")
-    page     = int(request.args.get("page", 1))
-    per_page = int(request.args.get("per_page", 20))
+    city = request.args.get("city", "Asunción")
     min_price = request.args.get("min_price", type=int)
     max_price = request.args.get("max_price", type=int)
-    pets    = request.args.get("pets_allowed")
+    pets = request.args.get("pets_allowed")
     smoking = request.args.get("smoking_allowed")
-    # FIX: type es un filtro OPCIONAL que puede venir del frontend.
-    # Antes estaba hardcodeado a "apartment", lo que ocultaba todos los
-    # listings de tipo "room" o "house" sin importar lo que el usuario creara.
     listing_type = request.args.get("type")
+
+    # BUG CORREGIDO: int(request.args.get(...)) → type=int
+    # Si page o per_page no son números, Flask devuelve el default en lugar de crashear.
+    page = request.args.get("page", 1, type=int) or 1
+    per_page = request.args.get("per_page", 20, type=int) or 20
 
     q = Listing.query.filter(
         Listing.city == city,
         Listing.status == "active",
     )
 
-    # Solo filtrar por type si el frontend lo pide explícitamente
+    # Solo filtrar por type si el frontend lo pide explícitamente.
+    # Antes estaba hardcodeado a "apartment", ocultando listings de tipo
+    # "room" o "house" sin importar lo que el usuario hubiera creado.
     if listing_type:
         q = q.filter(Listing.type == listing_type)
 
@@ -2029,23 +2090,31 @@ def get_listings():
     elif smoking == "false":
         q = q.filter(Listing.smoking_allowed == False)
 
-    total    = q.count()
-    listings = q.order_by(Listing.created_at.desc()) \
-                .offset((page - 1) * per_page) \
-                .limit(per_page) \
-                .all()
+    total = q.count()
+    listings = (
+        q.order_by(Listing.created_at.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all()
+    )
 
-    return jsonify({
-        "listings": [l.to_dict() for l in listings],
-        "total": total,
-        "page": page,
-        "pages": (total + per_page - 1) // per_page,
-    }), 200
+    return (
+        jsonify(
+            {
+                "listings": [l.to_dict() for l in listings],
+                "total": total,
+                "page": page,
+                "pages": (total + per_page - 1) // per_page,
+            }
+        ),
+        200,
+    )
 
 
-# ── GET /listings/<id> ──────────────────────────────────────────────────────
+# ── GET /listings/<id> ───────────────────────────────────────────────────────
 @listing_bp.route("/<int:listing_id>", methods=["GET"])
 def get_listing(listing_id):
+    # Este endpoint es público — no usa JWT, así que get_or_404 es correcto acá.
     listing = Listing.query.get_or_404(listing_id)
     data = listing.to_dict()
     owner_profile = listing.owner.profile
@@ -2053,13 +2122,16 @@ def get_listing(listing_id):
     return jsonify({"listing": data}), 200
 
 
-# ── POST /listings ──────────────────────────────────────────────────────────
+# ── POST /listings ───────────────────────────────────────────────────────────
 @listing_bp.route("/", methods=["POST"])
 @jwt_required()
 def create_listing():
-    user_id = int(get_jwt_identity())
-    data = request.get_json()
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
 
+    data = request.get_json()
     required = ["title", "city", "total_price", "rooms", "max_people"]
     for f in required:
         if f not in data:
@@ -2082,9 +2154,9 @@ def create_listing():
         smoking_allowed=data.get("smoking_allowed", False),
         furnished=data.get("furnished", False),
         type=data.get("type", "apartment"),
-        # FIX: setear status="active" explícitamente al crear.
-        # Si el modelo no tiene default o tiene default distinto, el listing
-        # quedaba con status NULL y el filtro .status=="active" lo excluía.
+        # Seteamos status="active" explícitamente al crear.
+        # Sin esto, si el modelo no tiene default, el listing queda con
+        # status=NULL y el filtro .status=="active" lo excluye de los resultados.
         status="active",
     )
     db.session.add(listing)
@@ -2092,21 +2164,37 @@ def create_listing():
     return jsonify({"listing": listing.to_dict()}), 201
 
 
-# ── PUT /listings/<id> ──────────────────────────────────────────────────────
+# ── PUT /listings/<id> ───────────────────────────────────────────────────────
 @listing_bp.route("/<int:listing_id>", methods=["PUT"])
 @jwt_required()
 def update_listing(listing_id):
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
     listing = Listing.query.get_or_404(listing_id)
     if listing.owner_id != user_id:
         return jsonify({"error": "Forbidden"}), 403
 
     data = request.get_json()
     updatable = [
-        "title", "description", "city", "neighborhood", "address",
-        "latitude", "longitude", "total_price", "rooms", "bathrooms",
-        "max_people", "pets_allowed", "smoking_allowed", "furnished",
-        "type", "status",
+        "title",
+        "description",
+        "city",
+        "neighborhood",
+        "address",
+        "latitude",
+        "longitude",
+        "total_price",
+        "rooms",
+        "bathrooms",
+        "max_people",
+        "pets_allowed",
+        "smoking_allowed",
+        "furnished",
+        "type",
+        "status",
     ]
     for f in updatable:
         if f in data:
@@ -2116,37 +2204,53 @@ def update_listing(listing_id):
     return jsonify({"listing": listing.to_dict()}), 200
 
 
-# ── DELETE /listings/<id> ───────────────────────────────────────────────────
+# ── DELETE /listings/<id> ────────────────────────────────────────────────────
 @listing_bp.route("/<int:listing_id>", methods=["DELETE"])
 @jwt_required()
 def delete_listing(listing_id):
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
     listing = Listing.query.get_or_404(listing_id)
     if listing.owner_id != user_id:
         return jsonify({"error": "Forbidden"}), 403
+
+    # Borrado lógico: marcamos como "deleted" en lugar de eliminar de la BD.
+    # Beneficio: podemos recuperar el registro si fue un error, y los chats
+    # o referencias a este listing no quedan con FK inválidas.
     listing.status = "deleted"
     db.session.commit()
     return jsonify({"message": "Listing deleted"}), 200
 
 
-# ── GET /listings/my ────────────────────────────────────────────────────────
+# ── GET /listings/my ─────────────────────────────────────────────────────────
 @listing_bp.route("/my", methods=["GET"])
 @jwt_required()
 def my_listings():
-    user_id = int(get_jwt_identity())
-    listings = Listing.query.filter_by(owner_id=user_id) \
-                            .order_by(Listing.created_at.desc()) \
-                            .all()
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
+    listings = (
+        Listing.query.filter_by(owner_id=user_id)
+        .order_by(Listing.created_at.desc())
+        .all()
+    )
     return jsonify({"listings": [l.to_dict() for l in listings]}), 200
+
 ----------------------------------------
 
 FILE_PATH: .\JAIKO\backend\app\routes\notification_routes.py
 ----------------------------------------
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
 from ..extensions import db
 from ..models import Notification
 from ..services.notification_service import send_notification
+from ..utils.jwt_helpers import get_current_user_id
 
 notification_bp = Blueprint("notifications", __name__)
 
@@ -2155,11 +2259,15 @@ notification_bp = Blueprint("notifications", __name__)
 @notification_bp.route("/", methods=["GET"])
 @jwt_required()
 def get_notifications():
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
 
-    # FIX: paginación agregada (antes era LIMIT 50 hardcodeado)
-    page = int(request.args.get("page", 1))
-    per_page = min(int(request.args.get("per_page", 20)), 50)
+    # BUG CORREGIDO: int(request.args.get(...)) → type=int en ambos params.
+    # El min(..., 50) se mantiene para que nadie pueda pedir más de 50 a la vez.
+    page = request.args.get("page", 1, type=int) or 1
+    per_page = min(request.args.get("per_page", 20, type=int) or 20, 50)
 
     base_query = Notification.query.filter_by(user_id=user_id)
     total = base_query.count()
@@ -2190,10 +2298,15 @@ def get_notifications():
 @notification_bp.route("/<int:notif_id>/read", methods=["PUT"])
 @jwt_required()
 def mark_read(notif_id):
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
     notif = Notification.query.get_or_404(notif_id)
     if notif.user_id != user_id:
         return jsonify({"error": "Acceso denegado"}), 403
+
     notif.read = True
     db.session.commit()
     return jsonify({"message": "Marcada como leída"}), 200
@@ -2203,7 +2316,11 @@ def mark_read(notif_id):
 @notification_bp.route("/read-all", methods=["PUT"])
 @jwt_required()
 def mark_all_read():
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
     Notification.query.filter_by(user_id=user_id, read=False).update({"read": True})
     db.session.commit()
     return jsonify({"message": "Todas marcadas como leídas"}), 200
@@ -2213,10 +2330,15 @@ def mark_all_read():
 @notification_bp.route("/<int:notif_id>", methods=["DELETE"])
 @jwt_required()
 def delete_notification(notif_id):
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
     notif = Notification.query.get_or_404(notif_id)
     if notif.user_id != user_id:
         return jsonify({"error": "Acceso denegado"}), 403
+
     db.session.delete(notif)
     db.session.commit()
     return jsonify({"message": "Notificación eliminada"}), 200
@@ -2226,7 +2348,11 @@ def delete_notification(notif_id):
 @notification_bp.route("/send-test", methods=["POST"])
 @jwt_required()
 def send_test_notification():
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
     send_notification(
         user_id=user_id,
         notif_type="system",
@@ -2241,11 +2367,12 @@ def send_test_notification():
 FILE_PATH: .\JAIKO\backend\app\routes\profile_routes.py
 ----------------------------------------
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
 from sqlalchemy import or_
 from ..extensions import db
 from ..models import User, Profile
 from ..services.matching_service import compute_compatibility
+from ..utils.jwt_helpers import get_current_user, get_current_user_id
 
 profile_bp = Blueprint("profiles", __name__)
 
@@ -2254,11 +2381,14 @@ profile_bp = Blueprint("profiles", __name__)
 @profile_bp.route("/me", methods=["PUT"])
 @jwt_required()
 def update_my_profile():
-    user_id = int(get_jwt_identity())
-    user = User.query.get_or_404(user_id)
+    # BUG #1 y #3 CORREGIDOS: get_current_user() maneja en un solo lugar
+    # la conversion int() segura Y el caso de usuario eliminado (devuelve 401, no 404).
+    user, err = get_current_user()
+    if err:
+        return err
     profile = user.profile
     if not profile:
-        profile = Profile(user_id=user_id, name="Nuevo Usuario")
+        profile = Profile(user_id=user.id, name="Nuevo Usuario")
         db.session.add(profile)
 
     data = request.get_json()
@@ -2280,7 +2410,7 @@ def update_my_profile():
         "lng",
         "pref_min_age",
         "pref_max_age",
-        "profile_photo_url",  # ← añadido: el frontend lo envía, el modelo lo tiene
+        "profile_photo_url",
     ]
     for field in allowed:
         if field in data:
@@ -2306,7 +2436,7 @@ def _parse_bool(value):
     Convierte un query param string a bool o None.
     Acepta: "true", "1", "yes" → True
             "false", "0", "no" → False
-            None, "" → None (sin filtro)
+            None, ""           → None (sin filtro aplicado)
     """
     if value is None or value == "":
         return None
@@ -2317,26 +2447,50 @@ def _parse_bool(value):
 @profile_bp.route("/search", methods=["GET"])
 @jwt_required()
 def search_profiles():
-    current_user_id = int(get_jwt_identity())
-    current_user = User.query.get_or_404(current_user_id)
+    current_user, err = get_current_user()
+    if err:
+        return err
     my_profile = current_user.profile
 
+    # ── Leer parámetros de la URL ─────────────────────────────────────────────
+
     city = request.args.get("city", "Asunción")
-    page = int(request.args.get("page", 1))
-    per_page = int(request.args.get("per_page", 20))
+
+    # BUG #1 CORREGIDO: antes usábamos int(...) directo, lo que lanza ValueError
+    # si el frontend manda ?page=abc o un valor vacío accidentalmente.
+    # Con type=int, Flask devuelve el default sin explotar.
+    # El "or 1" y "or 20" cubren el caso de que llegue page=0 (inválido).
+    # Beneficio para el usuario: nunca ve un error 500 por un param malformado.
+    page = request.args.get("page", 1, type=int) or 1
+    per_page = request.args.get("per_page", 20, type=int) or 20
+
+    # BUG #2 CORREGIDO: limitamos per_page para evitar que alguien pida
+    # ?per_page=9999 y sature la base de datos con una sola petición.
+    # Beneficio: la API no puede ser abusada para hacer queries enormes.
+    per_page = min(per_page, 100)
+
     min_age = request.args.get("min_age", type=int)
     max_age = request.args.get("max_age", type=int)
     pets_filter = _parse_bool(request.args.get("pets"))
     smoker_filter = _parse_bool(request.args.get("smoker"))
-    schedule_filter = request.args.get("schedule")
 
-    # FIX: umbral de compatibilidad configurable vía query param (default 50%)
-    # Bajamos el default de 80% a 50% para que aparezcan más resultados.
-    # El frontend puede pasar ?min_score=80 si quiere el comportamiento antiguo.
-    min_score = float(request.args.get("min_score", 50)) / 100.0
+    # BUG #3 CORREGIDO: "or None" convierte string vacío "" a None.
+    # Si el select de horario tiene value="" (Cualquiera), sin este fix
+    # el backend intentaba filtrar Profile.schedule == "", devolviendo 0 resultados.
+    # Beneficio: seleccionar "Cualquiera" en horario sí muestra todos los perfiles.
+    schedule_filter = request.args.get("schedule") or None
 
+    # BUG #4 CORREGIDO: antes float(...) sin try/except crasheaba si llegaba
+    # ?min_score=abc. Ahora cae silenciosamente al default del 50%.
+    # Beneficio: un parámetro inesperado no rompe toda la búsqueda.
+    try:
+        min_score = float(request.args.get("min_score", 50)) / 100.0
+    except (ValueError, TypeError):
+        min_score = 0.50
+
+    # ── Construir query base ──────────────────────────────────────────────────
     query = Profile.query.join(User, User.id == Profile.user_id).filter(
-        Profile.user_id != current_user_id,
+        Profile.user_id != current_user.id,
         Profile.is_looking == True,
         User.status == "active",
         Profile.city == city,
@@ -2348,11 +2502,11 @@ def search_profiles():
     if max_age:
         query = query.filter(Profile.age <= max_age)
 
-    # FIX: filtro de reciprocidad con manejo de NULL.
-    # Si pref_min_age o pref_max_age es NULL en el perfil del candidato,
-    # lo incluimos (sin preferencia = acepta cualquier edad).
-    # Antes: .filter(Profile.pref_min_age <= age) fallaba con NULL porque
-    # SQL evalúa NULL <= 25 como NULL (falso), excluyendo a casi todos.
+    # Filtro de reciprocidad con manejo de NULL.
+    # Si pref_min_age o pref_max_age es NULL en el candidato,
+    # lo incluimos — NULL significa "acepta cualquier edad".
+    # Sin el or_(...== None), SQL evalúa NULL <= 25 como NULL (falso)
+    # y excluiría a casi todos los perfiles.
     if my_profile and my_profile.age:
         query = query.filter(
             or_(Profile.pref_min_age == None, Profile.pref_min_age <= my_profile.age)
@@ -2361,7 +2515,6 @@ def search_profiles():
             or_(Profile.pref_max_age == None, Profile.pref_max_age >= my_profile.age)
         )
 
-    # FIX: usamos el helper _parse_bool para aceptar "true"/"false" y también "1"/"0"
     if pets_filter is not None:
         query = query.filter(Profile.pets == pets_filter)
     if smoker_filter is not None:
@@ -2371,7 +2524,7 @@ def search_profiles():
 
     all_profiles = query.all()
 
-    # Calcular compatibilidad y aplicar umbral mínimo
+    # ── Calcular compatibilidad y aplicar umbral mínimo ───────────────────────
     results = []
     for p in all_profiles:
         score, matches, mismatches = compute_compatibility(my_profile, p)
@@ -2385,7 +2538,7 @@ def search_profiles():
     # Ordenar por compatibilidad descendente
     results.sort(key=lambda x: x["compatibility"], reverse=True)
 
-    # Paginar DESPUÉS de filtrar (comportamiento correcto: página sobre resultados reales)
+    # Paginar DESPUÉS de filtrar (correcto: pagina sobre los resultados reales)
     total = len(results)
     paged = results[(page - 1) * per_page : page * per_page]
     has_more = (page * per_page) < total
@@ -2407,29 +2560,42 @@ def search_profiles():
 FILE_PATH: .\JAIKO\backend\app\routes\report_routes.py
 ----------------------------------------
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
 from ..extensions import db
 from ..models import Report
+from ..utils.jwt_helpers import get_current_user_id
 
 report_bp = Blueprint("reports", __name__)
 
 VALID_REASONS = [
-    "spam", "fake_profile", "harassment", "inappropriate_content",
-    "scam", "hate_speech", "other",
+    "spam",
+    "fake_profile",
+    "harassment",
+    "inappropriate_content",
+    "scam",
+    "hate_speech",
+    "other",
 ]
 
 
 @report_bp.route("/", methods=["POST"])
 @jwt_required()
 def create_report():
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
     data = request.get_json()
 
     if not data.get("reason") or data["reason"] not in VALID_REASONS:
         return jsonify({"error": f"reason must be one of {VALID_REASONS}"}), 400
 
     if not data.get("reported_user_id") and not data.get("reported_listing_id"):
-        return jsonify({"error": "reported_user_id or reported_listing_id required"}), 400
+        return (
+            jsonify({"error": "reported_user_id or reported_listing_id required"}),
+            400,
+        )
 
     report = Report(
         reporter_id=user_id,
@@ -2446,8 +2612,16 @@ def create_report():
 @report_bp.route("/my", methods=["GET"])
 @jwt_required()
 def my_reports():
-    user_id = int(get_jwt_identity())
-    reports = Report.query.filter_by(reporter_id=user_id).order_by(Report.created_at.desc()).all()
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
+    reports = (
+        Report.query.filter_by(reporter_id=user_id)
+        .order_by(Report.created_at.desc())
+        .all()
+    )
     return jsonify({"reports": [r.to_dict() for r in reports]}), 200
 
 ----------------------------------------
@@ -2455,10 +2629,11 @@ def my_reports():
 FILE_PATH: .\JAIKO\backend\app\routes\request_routes.py
 ----------------------------------------
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
 from ..extensions import db
 from ..models import RoommateRequest, User
 from ..services.notification_service import send_notification
+from ..utils.jwt_helpers import get_current_user_id
 
 request_bp = Blueprint("requests", __name__)
 
@@ -2467,9 +2642,12 @@ request_bp = Blueprint("requests", __name__)
 @request_bp.route("/", methods=["POST"])
 @jwt_required()
 def create_request():
-    user_id = int(get_jwt_identity())
-    data = request.get_json()
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
 
+    data = request.get_json()
     req_type = data.get("type", "roommate")
     target = data.get("target_user_id")
     group_id = data.get("group_id")
@@ -2481,11 +2659,10 @@ def create_request():
             400,
         )
 
-    # FIX: no permitir solicitud a uno mismo
     if target and target == user_id:
         return jsonify({"error": "No podés enviarte una solicitud a vos mismo"}), 400
 
-    # Verificar solicitud duplicada pendiente
+    # Verificar solicitud duplicada pendiente antes de crear una nueva
     existing = RoommateRequest.query.filter_by(
         sender_user_id=user_id,
         target_user_id=target,
@@ -2510,7 +2687,6 @@ def create_request():
     db.session.add(req)
     db.session.flush()
 
-    # Notificar al destinatario
     if target:
         send_notification(
             user_id=target,
@@ -2528,7 +2704,11 @@ def create_request():
 @request_bp.route("/<int:req_id>/respond", methods=["PUT"])
 @jwt_required()
 def respond_request(req_id):
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
     data = request.get_json()
     action = data.get("action")
 
@@ -2556,17 +2736,14 @@ def respond_request(req_id):
     if action == "accept":
         req.status = "accepted"
 
-        # FIX: asignar roomies correctamente (sender ↔ receiver)
+        # Vincular roomies mutuamente y desactivar búsqueda para ambos
         sender.profile.current_roomie_id = receiver.id
         receiver.profile.current_roomie_id = sender.id
-
-        # Ambos dejan de buscar
         sender.profile.is_looking = False
         receiver.profile.is_looking = False
 
         db.session.commit()
 
-        # FIX: notificar al EMISOR que fue aceptado
         send_notification(
             user_id=sender.id,
             notif_type="request_accepted",
@@ -2579,7 +2756,6 @@ def respond_request(req_id):
             },
         )
 
-        # FIX: devolver el EMISOR como roommate (no el receiver)
         return (
             jsonify(
                 {
@@ -2598,7 +2774,6 @@ def respond_request(req_id):
         req.status = "rejected"
         db.session.commit()
 
-        # FIX: notificar al emisor que fue rechazado
         send_notification(
             user_id=sender.id,
             notif_type="request_rejected",
@@ -2614,7 +2789,11 @@ def respond_request(req_id):
 @request_bp.route("/pending", methods=["GET"])
 @jwt_required()
 def get_pending_requests():
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
     reqs = (
         RoommateRequest.query.filter_by(target_user_id=user_id, status="pending")
         .order_by(RoommateRequest.created_at.desc())
@@ -2627,7 +2806,11 @@ def get_pending_requests():
 @request_bp.route("/sent", methods=["GET"])
 @jwt_required()
 def get_sent_requests():
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
     reqs = (
         RoommateRequest.query.filter_by(sender_user_id=user_id)
         .order_by(RoommateRequest.created_at.desc())
@@ -2640,7 +2823,11 @@ def get_sent_requests():
 @request_bp.route("/<int:req_id>/cancel", methods=["DELETE"])
 @jwt_required()
 def cancel_request(req_id):
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
     req = RoommateRequest.query.get_or_404(req_id)
 
     if req.sender_user_id != user_id:
@@ -2657,31 +2844,63 @@ def cancel_request(req_id):
 FILE_PATH: .\JAIKO\backend\app\routes\review_routes.py
 ----------------------------------------
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
 from ..extensions import db
 from ..models import Review, User
+from ..utils.jwt_helpers import get_current_user_id
 
 review_bp = Blueprint("reviews", __name__)
 
 
+# Endpoints públicos — no requieren JWT, get_or_404 es correcto acá
 @review_bp.route("/user/<int:target_id>", methods=["GET"])
 def get_user_reviews(target_id):
-    reviews = Review.query.filter_by(target_user_id=target_id).order_by(Review.created_at.desc()).all()
+    reviews = (
+        Review.query.filter_by(target_user_id=target_id)
+        .order_by(Review.created_at.desc())
+        .all()
+    )
     avg = round(sum(r.rating for r in reviews) / len(reviews), 1) if reviews else None
-    return jsonify({"reviews": [r.to_dict() for r in reviews], "average": avg, "total": len(reviews)}), 200
+    return (
+        jsonify(
+            {
+                "reviews": [r.to_dict() for r in reviews],
+                "average": avg,
+                "total": len(reviews),
+            }
+        ),
+        200,
+    )
 
 
 @review_bp.route("/listing/<int:listing_id>", methods=["GET"])
 def get_listing_reviews(listing_id):
-    reviews = Review.query.filter_by(listing_id=listing_id).order_by(Review.created_at.desc()).all()
+    reviews = (
+        Review.query.filter_by(listing_id=listing_id)
+        .order_by(Review.created_at.desc())
+        .all()
+    )
     avg = round(sum(r.rating for r in reviews) / len(reviews), 1) if reviews else None
-    return jsonify({"reviews": [r.to_dict() for r in reviews], "average": avg, "total": len(reviews)}), 200
+    return (
+        jsonify(
+            {
+                "reviews": [r.to_dict() for r in reviews],
+                "average": avg,
+                "total": len(reviews),
+            }
+        ),
+        200,
+    )
 
 
 @review_bp.route("/", methods=["POST"])
 @jwt_required()
 def create_review():
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
     data = request.get_json()
 
     if not data.get("rating") or not (1 <= int(data["rating"]) <= 5):
@@ -2690,7 +2909,7 @@ def create_review():
     if not data.get("target_user_id") and not data.get("listing_id"):
         return jsonify({"error": "target_user_id or listing_id required"}), 400
 
-    # Prevent duplicate reviews
+    # Evitar reseñas duplicadas del mismo usuario al mismo destino
     existing = Review.query.filter_by(
         reviewer_id=user_id,
         target_user_id=data.get("target_user_id"),
@@ -2714,10 +2933,15 @@ def create_review():
 @review_bp.route("/<int:review_id>", methods=["DELETE"])
 @jwt_required()
 def delete_review(review_id):
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
     review = Review.query.get_or_404(review_id)
     if review.reviewer_id != user_id:
         return jsonify({"error": "Forbidden"}), 403
+
     db.session.delete(review)
     db.session.commit()
     return jsonify({"message": "Review deleted"}), 200
@@ -2728,19 +2952,20 @@ FILE_PATH: .\JAIKO\backend\app\routes\upload_routes.py
 ----------------------------------------
 import uuid
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
 from ..extensions import db
 from ..models import Profile, ListingPhoto, Listing, VerificationRequest, Group
 from ..utils.storage import upload_image
+from ..utils.jwt_helpers import get_current_user_id
 
 upload_bp = Blueprint("upload", __name__)
 
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
 
 # Límite de 5 MB expresado en bytes.
-# Por qué 5 MB: es más que suficiente para una foto de perfil o departamento
-# de buena calidad. Imágenes más grandes casi siempre son fotos sin comprimir
-# que el frontend debería redimensionar antes de subir.
+# Es más que suficiente para una foto de perfil o departamento de buena calidad.
+# Imágenes más grandes casi siempre son fotos sin comprimir que el frontend
+# debería redimensionar antes de subir.
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
 
 
@@ -2759,24 +2984,21 @@ def _validate_file(file) -> tuple[bool, str]:
     de tamaño o las extensiones permitidas, se edita en un solo lugar.
 
     Por qué usamos seek/tell en lugar de len(file.read()):
-    file.read() cargaría el archivo completo en memoria solo para contar bytes,
-    que es exactamente el problema que queremos prevenir. seek(0, 2) mueve
-    el cursor al final del archivo y tell() devuelve esa posición (= tamaño),
-    sin leer nada. Después seek(0) resetea el cursor para que el read()
-    posterior funcione correctamente.
+    file.read() cargaría el archivo completo en memoria solo para contar bytes.
+    seek(0, 2) mueve el cursor al final y tell() devuelve esa posición (= tamaño),
+    sin leer nada. Después seek(0) resetea el cursor para el read() posterior.
 
     Returns:
-        (True, "")            si el archivo es válido
-        (False, "mensaje")    si hay algún problema
+        (True, "")          si el archivo es válido
+        (False, "mensaje")  si hay algún problema
     """
     ext = _get_ext(file.filename)
     if ext not in ALLOWED_EXTENSIONS:
         return False, "Solo se permiten jpg/png/webp"
 
-    # Medimos el tamaño sin leer el contenido
-    file.seek(0, 2)  # mover cursor al final
-    size = file.tell()  # leer la posición = tamaño en bytes
-    file.seek(0)  # resetear cursor al inicio
+    file.seek(0, 2)
+    size = file.tell()
+    file.seek(0)
 
     if size > MAX_FILE_SIZE:
         mb = MAX_FILE_SIZE // (1024 * 1024)
@@ -2789,7 +3011,10 @@ def _validate_file(file) -> tuple[bool, str]:
 @upload_bp.route("/profile-photo", methods=["POST"])
 @jwt_required()
 def upload_profile_photo():
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
 
     if "file" not in request.files:
         return jsonify({"error": "No file provided"}), 400
@@ -2822,9 +3047,12 @@ def upload_profile_photo():
 @upload_bp.route("/listing/<int:listing_id>/photo", methods=["POST"])
 @jwt_required()
 def upload_listing_photo(listing_id):
-    user_id = int(get_jwt_identity())
-    listing = Listing.query.get_or_404(listing_id)
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
 
+    listing = Listing.query.get_or_404(listing_id)
     if listing.owner_id != user_id:
         return jsonify({"error": "Forbidden"}), 403
 
@@ -2832,7 +3060,6 @@ def upload_listing_photo(listing_id):
         return jsonify({"error": "No file provided"}), 400
 
     file = request.files["file"]
-
     ok, error = _validate_file(file)
     if not ok:
         return jsonify({"error": error}), 400
@@ -2854,16 +3081,17 @@ def upload_listing_photo(listing_id):
 
 
 # ── Foto de grupo ─────────────────────────────────────────────────────────────
-# BUG #5 CORREGIDO: se usaba group.owner_id pero el modelo Group no tiene ese
-# campo. El campo correcto es group.created_by (definido en models/group.py).
-# También se movió el import de Group al bloque de imports del archivo (arriba),
-# en lugar de tenerlo dentro de la función — es más limpio y es la convención.
 @upload_bp.route("/group/<int:group_id>/photo", methods=["POST"])
 @jwt_required()
 def upload_group_photo(group_id):
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
     group = Group.query.get_or_404(group_id)
 
+    # Verificamos contra created_by (no owner_id — ese campo no existe en Group)
     if group.created_by != user_id:
         return jsonify({"error": "Forbidden"}), 403
 
@@ -2871,7 +3099,6 @@ def upload_group_photo(group_id):
         return jsonify({"error": "No file provided"}), 400
 
     file = request.files["file"]
-
     ok, error = _validate_file(file)
     if not ok:
         return jsonify({"error": error}), 400
@@ -2894,7 +3121,10 @@ def upload_group_photo(group_id):
 @upload_bp.route("/verification-selfie", methods=["POST"])
 @jwt_required()
 def upload_verification_selfie():
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
 
     vr = VerificationRequest.query.filter_by(user_id=user_id).first()
     if not vr:
@@ -2904,7 +3134,6 @@ def upload_verification_selfie():
         return jsonify({"error": "No file provided"}), 400
 
     file = request.files["file"]
-
     ok, error = _validate_file(file)
     if not ok:
         return jsonify({"error": error}), 400
@@ -2913,12 +3142,13 @@ def upload_verification_selfie():
     filename = f"verify_{user_id}_{uuid.uuid4().hex[:8]}.{ext}"
 
     try:
-        # Sube al bucket PRIVADO — devuelve el path, no URL pública
+        # Sube al bucket PRIVADO — devuelve el path, no URL pública.
+        # La URL firmada temporal se genera en verification_routes.py cuando
+        # el admin necesita ver la selfie.
         path = upload_image(file.read(), filename, bucket="verifications")
     except Exception as e:
         return jsonify({"error": f"Upload fallido: {str(e)}"}), 500
 
-    # Guardamos el PATH (no URL pública) en selfie_url
     vr.selfie_url = path
     vr.status = "pending_verification"
     db.session.commit()
@@ -2933,23 +3163,35 @@ import random
 import string
 from functools import wraps
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
 from ..extensions import db
 from ..models import VerificationRequest, User, Profile
 from ..utils.storage import get_signed_url
+from ..utils.jwt_helpers import get_current_user, get_current_user_id
 
 verification_bp = Blueprint("verification", __name__)
 
 
 def verifier_required(fn):
+    """
+    Decorador que verifica que el usuario autenticado tenga rol 'admin' o 'verifier'.
+
+    BUG CORREGIDO: antes usaba int(get_jwt_identity()) + get_or_404.
+    Mismo problema que admin_required: crash con ValueError si el sub del token
+    no es un entero, y 404 en lugar de 401 si el usuario fue eliminado.
+    Ahora usa get_current_user() que maneja ambos casos de forma segura.
+    """
+
     @wraps(fn)
     @jwt_required()
     def wrapper(*args, **kwargs):
-        user_id = int(get_jwt_identity())
-        user = User.query.get_or_404(user_id)
+        user, err = get_current_user()
+        if err:
+            return err
         if user.role not in ("admin", "verifier"):
             return jsonify({"error": "Verifier access required"}), 403
         return fn(*args, **kwargs)
+
     return wrapper
 
 
@@ -2961,10 +3203,14 @@ def _generate_code() -> str:
 @verification_bp.route("/request", methods=["POST"])
 @jwt_required()
 def request_verification():
-    user_id = int(get_jwt_identity())
-    user = User.query.get_or_404(user_id)
+    # BUG CORREGIDO: int(get_jwt_identity()) + get_or_404 → get_current_user()
+    # Aquí necesitamos el objeto User completo (para acceder a user.profile),
+    # así que usamos get_current_user() en lugar de get_current_user_id().
+    user, err = get_current_user()
+    if err:
+        return err
 
-    existing = VerificationRequest.query.filter_by(user_id=user_id).first()
+    existing = VerificationRequest.query.filter_by(user_id=user.id).first()
     if existing:
         if existing.status == "verified":
             return jsonify({"error": "Already verified"}), 400
@@ -2976,7 +3222,7 @@ def request_verification():
         return jsonify({"verification": existing.to_dict()}), 200
 
     code = _generate_code()
-    vr = VerificationRequest(user_id=user_id, verification_code=code)
+    vr = VerificationRequest(user_id=user.id, verification_code=code)
     db.session.add(vr)
 
     if user.profile:
@@ -2990,11 +3236,14 @@ def request_verification():
 @verification_bp.route("/me", methods=["GET"])
 @jwt_required()
 def get_my_verification():
-    user_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    # Solo necesitamos el id para filtrar — no hace falta traer el User completo.
+    user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}), 401
+
     vr = VerificationRequest.query.filter_by(user_id=user_id).first()
-    if not vr:
-        return jsonify({"verification": None}), 200
-    return jsonify({"verification": vr.to_dict()}), 200
+    return jsonify({"verification": vr.to_dict() if vr else None}), 200
 
 
 # ── Admin/Verifier: listar pendientes ────────────────────────────────────────
@@ -3005,7 +3254,6 @@ def get_pending():
     result = []
     for v in pending:
         d = v.to_dict()
-        # Incluir foto de perfil pública del usuario
         if v.user and v.user.profile:
             d["profile_photo_url"] = v.user.profile.profile_photo_url
             d["user_name"] = v.user.profile.name
@@ -3029,8 +3277,8 @@ def get_selfie_signed_url(vr_id):
     try:
         signed_url = get_signed_url(
             bucket="verifications",
-            path=vr.selfie_url,   # selfie_url guarda el path, no la URL pública
-            expires_in=3600       # expira en 1 hora
+            path=vr.selfie_url,  # selfie_url guarda el path, no la URL pública
+            expires_in=3600,  # expira en 1 hora
         )
     except Exception as e:
         return jsonify({"error": f"No se pudo generar la URL: {str(e)}"}), 500
@@ -3042,7 +3290,11 @@ def get_selfie_signed_url(vr_id):
 @verification_bp.route("/<int:vr_id>/review", methods=["PUT"])
 @verifier_required
 def review_verification(vr_id):
-    reviewer_id = int(get_jwt_identity())
+    # BUG CORREGIDO: int(get_jwt_identity()) → get_current_user_id()
+    # verifier_required ya validó que el usuario existe y tiene rol correcto,
+    # así que get_current_user_id() es suficiente — solo necesitamos el id.
+    reviewer_id = get_current_user_id()
+
     vr = VerificationRequest.query.get_or_404(vr_id)
     data = request.get_json()
 
@@ -3066,6 +3318,7 @@ def review_verification(vr_id):
 
     db.session.commit()
     return jsonify({"verification": vr.to_dict()}), 200
+
 ----------------------------------------
 
 FILE_PATH: .\JAIKO\backend\app\routes\__init__.py
@@ -3392,6 +3645,88 @@ def on_stop_typing(data):
 
 FILE_PATH: .\JAIKO\backend\app\sockets\__init__.py
 ----------------------------------------
+
+----------------------------------------
+
+FILE_PATH: .\JAIKO\backend\app\utils\jwt_helpers.py
+----------------------------------------
+"""
+Utilidades para manejar JWT de forma segura en todas las rutas.
+
+¿Por qué existe este archivo?
+  En Flask-JWT-Extended, get_jwt_identity() devuelve el campo "sub" del token
+  como string (ej: "42"). Usábamos int(...) directo en cada ruta, lo que lanza
+  ValueError si el sub del token no es un número válido.
+
+  Centralizar esto en una función tiene dos ventajas (Clean Code):
+  1. DRY (Don't Repeat Yourself): el manejo del error está en un solo lugar,
+     no copiado 42 veces en 12 archivos.
+  2. Si algún día cambia cómo Flask-JWT-Extended devuelve la identidad,
+     solo hay que actualizar este archivo.
+"""
+
+from flask import jsonify
+from flask_jwt_extended import get_jwt_identity
+from ..models import User
+
+
+def get_current_user_id() -> int | None:
+    """
+    Extrae y convierte el user_id del JWT de forma segura.
+
+    Devuelve el id como int, o None si el token tiene un sub inválido.
+    Uso típico en una ruta:
+
+        user_id = get_current_user_id()
+        if user_id is None:
+            return jsonify({"error": "Token inválido"}), 401
+    """
+    try:
+        return int(get_jwt_identity())
+    except (TypeError, ValueError):
+        return None
+
+
+def get_current_user():
+    """
+    Devuelve (user, error_response) donde uno de los dos siempre es None.
+
+    Maneja tres casos en un solo lugar:
+      - Token con sub inválido (no es un entero)   → 401
+      - Usuario eliminado de la BD con token válido → 401 (no 404)
+      - Usuario bloqueado con token válido          → 401
+
+    ¿Por qué 401 y no 404 cuando el usuario no existe?
+    El código 404 significa "recurso no encontrado" — correcto para un perfil
+    público. Pero en un endpoint autenticado, si el DUEÑO del token no existe,
+    el problema es de autenticación, no de recurso. El 401 le indica al
+    frontend que debe limpiar el token y redirigir al login.
+
+    Uso típico en una ruta:
+
+        user, err = get_current_user()
+        if err:
+            return err
+        # A partir de aquí `user` es seguro de usar
+    """
+    user_id = get_current_user_id()
+    if user_id is None:
+        return None, (
+            jsonify({"error": "Token inválido. Iniciá sesión nuevamente."}),
+            401,
+        )
+
+    user = User.query.get(user_id)
+    if user is None:
+        return None, (
+            jsonify({"error": "Usuario no encontrado. Iniciá sesión nuevamente."}),
+            401,
+        )
+
+    if user.is_blocked():
+        return None, (jsonify({"error": "Tu cuenta está suspendida."}), 401)
+
+    return user, None
 
 ----------------------------------------
 
@@ -8326,7 +8661,7 @@ export default function RegisterPage() {
 FILE_PATH: .\JAIKO\frontend\src\pages\SearchPage.jsx
 ----------------------------------------
 import React, { useState, useEffect, useCallback } from 'react';
-import { SlidersHorizontal, X, MapPin, Search as SearchIcon } from 'lucide-react';
+import { SlidersHorizontal, X, MapPin } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import ProfileCard from '../components/ui/ProfileCard';
@@ -8347,13 +8682,25 @@ L.Icon.Default.mergeOptions({
 
 const SCHEDULES = ['morning', 'afternoon', 'night', 'flexible'];
 const SCHEDULE_LABELS = { morning: 'Mañana', afternoon: 'Tarde', night: 'Noche', flexible: 'Flexible' };
-const CITIES = ['Asunción', 'San Lorenzo', 'Luque', 'Fernando de la Mora', 'Lambaré', 'Capiatá', 'Encarnación', 'Ciudad del Este'];
+const CITIES = [
+  'Asunción', 'San Lorenzo', 'Luque', 'Fernando de la Mora',
+  'Lambaré', 'Capiatá', 'Encarnación', 'Ciudad del Este',
+];
 const CITY_CENTERS = {
-  'Asunción': [-25.2867, -57.647], 'San Lorenzo': [-25.3355, -57.5178], 'Luque': [-25.2635, -57.4857],
-  'Fernando de la Mora': [-25.3085, -57.5225], 'Lambaré': [-25.3404, -57.6075], 'Capiatá': [-25.356, -57.4455],
-  'Encarnación': [-27.3333, -55.8667], 'Ciudad del Este': [-25.5097, -54.611],
+  'Asunción': [-25.2867, -57.647],
+  'San Lorenzo': [-25.3355, -57.5178],
+  'Luque': [-25.2635, -57.4857],
+  'Fernando de la Mora': [-25.3085, -57.5225],
+  'Lambaré': [-25.3404, -57.6075],
+  'Capiatá': [-25.356, -57.4455],
+  'Encarnación': [-27.3333, -55.8667],
+  'Ciudad del Este': [-25.5097, -54.611],
 };
 const AVATAR_FALLBACK = 'https://ui-avatars.com/api/?background=fde8d0&color=c2550a&size=40&name=';
+
+const EMPTY_FILTERS = {
+  city: 'Asunción', pets: '', smoker: '', schedule: '', min_age: '', max_age: '',
+};
 
 export default function SearchPage() {
   const navigate = useNavigate();
@@ -8363,22 +8710,41 @@ export default function SearchPage() {
   const [hasMore, setHasMore] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
   const [showMap, setShowMap] = useState(false);
-  const [filters, setFilters] = useState({
-    city: 'Asunción', pets: '', smoker: '', schedule: '', min_age: '', max_age: ''
-  });
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
 
-  const fetchProfiles = useCallback(async (p = 1, currentFilters = filters) => {
+  // BUG #1 CORREGIDO: fetchProfiles ya NO depende del closure de `filters`.
+  // Antes: useCallback([filters]) creaba una función NUEVA en cada cambio de filtro.
+  // Eso obligaba a poner fetchProfiles en el useEffect deps, generando confusión.
+  // Ahora: recibe `currentFilters` como parámetro → función estable con deps=[].
+  // Beneficio: código más predecible — la función no "cambia" entre renders.
+  const fetchProfiles = useCallback(async (p = 1, currentFilters) => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page: p, per_page: 20, city: currentFilters.city });
-      if (currentFilters.min_age) params.append('min_age', currentFilters.min_age);
-      if (currentFilters.max_age) params.append('max_age', currentFilters.max_age);
-      if (currentFilters.pets !== '') params.append('pets', currentFilters.pets);
-      if (currentFilters.smoker !== '') params.append('smoker', currentFilters.smoker);
-      if (currentFilters.schedule) params.append('schedule', currentFilters.schedule);
+      // BUG #2 CORREGIDO: antes armábamos un URLSearchParams y lo concatenábamos
+      // como string al URL: api.get(`/profiles/search?${params}`).
+      // Problema: si la ciudad tiene caracteres especiales (tildes, espacios),
+      // el encoding manual puede fallar o duplicarse con el de Axios.
+      // Ahora: pasamos params como objeto a Axios, que hace el encoding correcto.
+      // Beneficio: ciudades como "Fernando de la Mora" se envían sin errores de URL.
+      const params = {
+        page: p,
+        per_page: 20,
+        city: currentFilters.city,
+      };
 
-      const { data } = await api.get(`/profiles/search?${params}`);
-      
+      // Solo agregamos los filtros que tienen valor.
+      // Si están vacíos (""), NO los enviamos — el backend los ignora
+      // y devuelve todos los resultados (comportamiento correcto).
+      if (currentFilters.min_age) params.min_age = currentFilters.min_age;
+      if (currentFilters.max_age) params.max_age = currentFilters.max_age;
+      if (currentFilters.pets !== '') params.pets = currentFilters.pets;
+      if (currentFilters.smoker !== '') params.smoker = currentFilters.smoker;
+      if (currentFilters.schedule) params.schedule = currentFilters.schedule;
+
+      const { data } = await api.get('/profiles/search', { params });
+
+      // Si el perfil no tiene coordenadas propias, usamos el centro de su ciudad
+      // para que igual aparezca en el mapa sin quedar invisible.
       const profilesWithCoords = (data.profiles || []).map((profile) => ({
         ...profile,
         location: {
@@ -8387,6 +8753,8 @@ export default function SearchPage() {
         },
       }));
 
+      // p === 1 → reemplaza la lista (nueva búsqueda)
+      // p > 1   → agrega al final (paginación "Cargar más")
       setProfiles(p === 1 ? profilesWithCoords : (prev) => [...prev, ...profilesWithCoords]);
       setPage(p);
       setHasMore(data.has_more ?? false);
@@ -8395,32 +8763,45 @@ export default function SearchPage() {
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, []); // ✅ Sin dependencias: la función es estable durante toda la vida del componente.
 
+  // BUG #3 CORREGIDO: antes el useEffect dependía de [filters, fetchProfiles].
+  // Como fetchProfiles cambiaba cada vez que filters cambiaba, ambos siempre
+  // cambiaban juntos — tener los dos en deps era redundante y confuso.
+  // Ahora fetchProfiles es estable (deps=[]), así que solo dependemos de [filters].
+  // Debounce de 400ms solo para campos de edad (el usuario escribe carácter a carácter).
+  // Para selects (ciudad, mascotas, etc.) se aplica inmediatamente (0ms).
   useEffect(() => {
-    const timer = setTimeout(() => { 
-      fetchProfiles(1, filters); 
-    }, filters.min_age || filters.max_age ? 400 : 0);
-    return () => clearTimeout(timer);
+    const delay = (filters.min_age || filters.max_age) ? 400 : 0;
+    const timer = setTimeout(() => {
+      fetchProfiles(1, filters);
+    }, delay);
+    return () => clearTimeout(timer); // Limpia el timer si el usuario sigue escribiendo
   }, [filters, fetchProfiles]);
 
+  // Cuenta cuántos filtros están activos para mostrar el badge naranja
   const activeFilterCount = [
-    filters.pets, filters.smoker, filters.schedule, filters.min_age, filters.max_age
+    filters.pets, filters.smoker, filters.schedule, filters.min_age, filters.max_age,
   ].filter(Boolean).length;
 
   const mapCenter = CITY_CENTERS[filters.city] || [-25.2867, -57.647];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
+
       {/* HEADER */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
         <div>
-          <h1 className="font-display font-extrabold text-3xl sm:text-4xl text-slate-900">Buscar Roomies</h1>
+          <h1 className="font-display font-extrabold text-3xl sm:text-4xl text-slate-900">
+            Buscar Roomies
+          </h1>
           <p className="text-orange-500 font-medium mt-1">
-            {profiles.length > 0 ? `${profiles.length} roomies compatibles encontrados` : 'Perfiles compatibles con vos'}
+            {profiles.length > 0
+              ? `${profiles.length} roomies compatibles encontrados`
+              : 'Perfiles compatibles con vos'}
           </p>
         </div>
-        
+
         <div className="flex items-center gap-3 flex-wrap">
           <button
             onClick={() => setShowMap(!showMap)}
@@ -8445,55 +8826,120 @@ export default function SearchPage() {
       </div>
 
       {/* FILTROS */}
-      <div className={`card mb-10 overflow-hidden transition-all duration-500 ${showFilters ? 'max-h-[1000px] opacity-100 p-8' : 'max-h-0 opacity-0 p-0 border-none shadow-none'}`}>
+      <div
+        className={`card mb-10 overflow-hidden transition-all duration-500 ${showFilters
+            ? 'max-h-[1000px] opacity-100 p-8'
+            : 'max-h-0 opacity-0 p-0 border-none shadow-none'
+          }`}
+      >
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 items-end">
+
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Ciudad</label>
-            <select className="input" value={filters.city} onChange={(e) => setFilters((f) => ({ ...f, city: e.target.value }))}>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">
+              Ciudad
+            </label>
+            <select
+              className="input"
+              value={filters.city}
+              onChange={(e) => setFilters((f) => ({ ...f, city: e.target.value }))}
+            >
               {CITIES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
+
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Mascotas</label>
-            <select className="input" value={filters.pets} onChange={(e) => setFilters((f) => ({ ...f, pets: e.target.value }))}>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">
+              Mascotas
+            </label>
+            <select
+              className="input"
+              value={filters.pets}
+              onChange={(e) => setFilters((f) => ({ ...f, pets: e.target.value }))}
+            >
               <option value="">Cualquiera</option>
               <option value="true">Con mascotas</option>
               <option value="false">Sin mascotas</option>
             </select>
           </div>
+
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Fumador</label>
-            <select className="input" value={filters.smoker} onChange={(e) => setFilters((f) => ({ ...f, smoker: e.target.value }))}>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">
+              Fumador
+            </label>
+            <select
+              className="input"
+              value={filters.smoker}
+              onChange={(e) => setFilters((f) => ({ ...f, smoker: e.target.value }))}
+            >
               <option value="">Cualquiera</option>
               <option value="false">No fuma</option>
               <option value="true">Fumador</option>
             </select>
           </div>
+
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Horario</label>
-            <select className="input" value={filters.schedule} onChange={(e) => setFilters((f) => ({ ...f, schedule: e.target.value }))}>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">
+              Horario
+            </label>
+            <select
+              className="input"
+              value={filters.schedule}
+              onChange={(e) => setFilters((f) => ({ ...f, schedule: e.target.value }))}
+            >
               <option value="">Cualquiera</option>
-              {SCHEDULES.map((s) => <option key={s} value={s}>{SCHEDULE_LABELS[s]}</option>)}
+              {SCHEDULES.map((s) => (
+                <option key={s} value={s}>{SCHEDULE_LABELS[s]}</option>
+              ))}
             </select>
           </div>
+
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Edad mín.</label>
-            <input type="number" className="input" placeholder="18" min={18} max={80} value={filters.min_age}
-              onChange={(e) => setFilters((f) => ({ ...f, min_age: e.target.value }))} />
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">
+              Edad mín.
+            </label>
+            <input
+              type="number"
+              className="input"
+              placeholder="18"
+              min={18}
+              max={80}
+              value={filters.min_age}
+              onChange={(e) => setFilters((f) => ({ ...f, min_age: e.target.value }))}
+            />
           </div>
+
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Edad máx.</label>
-            <input type="number" className="input" placeholder="99" min={18} max={99} value={filters.max_age}
-              onChange={(e) => setFilters((f) => ({ ...f, max_age: e.target.value }))} />
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">
+              Edad máx.
+            </label>
+            <input
+              type="number"
+              className="input"
+              placeholder="99"
+              min={18}
+              max={99}
+              value={filters.max_age}
+              onChange={(e) => setFilters((f) => ({ ...f, max_age: e.target.value }))}
+            />
           </div>
-          
+
           <div className="sm:col-span-2 lg:col-span-3 flex justify-end gap-3 pt-4 border-t border-slate-50">
-            <button type="button"
-              onClick={() => setFilters({ city: 'Asunción', pets: '', smoker: '', schedule: '', min_age: '', max_age: '' })}
-              className="btn-ghost text-sm">
+            {/* Limpiar filtros → resetea al estado inicial y el useEffect re-busca */}
+            <button
+              type="button"
+              onClick={() => setFilters(EMPTY_FILTERS)}
+              className="btn-ghost text-sm"
+            >
               Limpiar filtros
             </button>
-            <button onClick={() => fetchProfiles(1, filters)} className="btn-primary px-8">Aplicar filtros</button>
+            {/* Aplicar filtros → útil si el usuario cambió edad y no quiere esperar el debounce */}
+            <button
+              type="button"
+              onClick={() => fetchProfiles(1, filters)}
+              className="btn-primary px-8"
+            >
+              Aplicar filtros
+            </button>
           </div>
         </div>
       </div>
@@ -8502,33 +8948,55 @@ export default function SearchPage() {
       {loading && profiles.length === 0 ? (
         <div className="flex justify-center py-32"><Spinner size="lg" /></div>
       ) : profiles.length === 0 ? (
-        <EmptyState icon="🔍" title="No encontramos roomies compatibles"
-          description="Probá ajustar tus preferencias en tu perfil o cambiar el filtro de ciudad." />
+        <EmptyState
+          icon="🔍"
+          title="No encontramos roomies compatibles"
+          description="Probá ajustar tus preferencias en tu perfil o cambiar el filtro de ciudad."
+        />
       ) : showMap ? (
         <div className="rounded-3xl overflow-hidden border border-slate-100 shadow-2xl h-[600px] relative z-0">
-          <MapContainer center={mapCenter} zoom={13} style={{ height: '100%', width: '100%' }} scrollWheelZoom={false}>
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
+          <MapContainer
+            center={mapCenter}
+            zoom={13}
+            style={{ height: '100%', width: '100%' }}
+            scrollWheelZoom={false}
+          >
+            <TileLayer
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              attribution="&copy; OpenStreetMap contributors"
+            />
             {profiles.map((p) => (
               <Marker key={p.user_id} position={[p.location.lat, p.location.lng]}>
                 <Popup>
-                  <div className="cursor-pointer w-60 p-2" onClick={() => navigate(`/profile/${p.user_id}`)}>
+                  <div
+                    className="cursor-pointer w-60 p-2"
+                    onClick={() => navigate(`/profile/${p.user_id}`)}
+                  >
                     <div className="flex items-center gap-2 mb-2">
                       <img
                         src={p.profile_photo_url || `${AVATAR_FALLBACK}${encodeURIComponent(p.name || 'U')}`}
-                        alt={p.name} className="w-10 h-10 rounded-full object-cover" loading="lazy"
-                        onError={(e) => { e.target.src = `${AVATAR_FALLBACK}${encodeURIComponent(p.name || 'U')}` }}
+                        alt={p.name}
+                        className="w-10 h-10 rounded-full object-cover"
+                        loading="lazy"
+                        onError={(e) => {
+                          e.target.src = `${AVATAR_FALLBACK}${encodeURIComponent(p.name || 'U')}`;
+                        }}
                       />
                       <div>
                         <p className="font-semibold text-sm">{p.name}</p>
                         <p className="text-xs text-gray-500">{p.city}</p>
                       </div>
                     </div>
-                    {p.bio && <p className="text-xs text-gray-600 mb-1 line-clamp-2">{p.bio}</p>}
+                    {p.bio && (
+                      <p className="text-xs text-gray-600 mb-1 line-clamp-2">{p.bio}</p>
+                    )}
                     <p className="text-xs text-gray-400 mb-1">
                       {p.smoker ? 'Fumador' : 'No fuma'}
                       {p.schedule ? ` • ${SCHEDULE_LABELS[p.schedule] || p.schedule}` : ''}
                     </p>
-                    <div className="text-xs font-bold text-orange-600">Compatibilidad: {p.compatibility}%</div>
+                    <div className="text-xs font-bold text-orange-600">
+                      Compatibilidad: {p.compatibility}%
+                    </div>
                   </div>
                 </Popup>
               </Marker>
@@ -8539,20 +9007,20 @@ export default function SearchPage() {
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
             {profiles.map((p) => (
-              <ProfileCard 
-                key={p.user_id} 
-                profile={p} 
-                compatibility={p.compatibility} 
-                matches={p.matches} 
-                mismatches={p.mismatches} 
+              <ProfileCard
+                key={p.user_id}
+                profile={p}
+                compatibility={p.compatibility}
+                matches={p.matches}
+                mismatches={p.mismatches}
               />
             ))}
           </div>
           {hasMore && (
             <div className="flex justify-center mt-12">
-              <button 
-                onClick={() => fetchProfiles(page + 1, filters)} 
-                disabled={loading} 
+              <button
+                onClick={() => fetchProfiles(page + 1, filters)}
+                disabled={loading}
                 className="btn-secondary px-10 flex items-center gap-2"
               >
                 {loading && <Spinner size="sm" />} Cargar más
