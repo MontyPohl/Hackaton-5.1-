@@ -21,16 +21,16 @@ const ListingCard = ({ listing }) => {
       </div>
       <div className="p-5">
         <div className="flex justify-between items-start mb-2">
-          <h3 className="font-bold text-slate-900 truncate flex-1">{listing.title}</h3>
+          <h3 className="font-bold text-blue-950 truncate flex-1">{listing.title}</h3>
           <p className="font-display font-extrabold text-blue-600 ml-2">
             ₲ {(listing.total_price / 1000000).toFixed(1)}M
           </p>
         </div>
-        <div className="flex items-center gap-1 text-slate-400 text-xs mb-4">
+        <div className="flex items-center gap-1 text-blue-900/40 text-xs mb-4 font-bold">
           <MapPin size={12} />
           <span className="truncate">{listing.neighborhood}, {listing.city}</span>
         </div>
-        <div className="flex items-center gap-4 text-slate-500 text-xs border-t border-slate-50 pt-4">
+        <div className="flex items-center gap-4 text-blue-900/60 text-xs border-t border-orange-50 pt-4 font-bold">
           <div className="flex items-center gap-1">
             <BedDouble size={14} className="text-orange-500" />
             <span>{listing.rooms} hab.</span>

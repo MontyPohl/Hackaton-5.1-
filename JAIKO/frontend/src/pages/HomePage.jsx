@@ -15,6 +15,8 @@ import {
   ChevronRight
 } from "lucide-react";
 
+import Logo from "../components/ui/Logo"; // <-- Esta ruta está bien si la carpeta components está en la raíz.
+
 const FEATURES = [
   { 
     icon: <ShieldCheck className="w-6 h-6" />, 
@@ -84,7 +86,7 @@ const HomePage = () => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen">
       {/* ── Hero ───────────────────────────────────────────────────────────── */}
       <section className="relative h-screen min-h-[700px] flex items-center justify-center overflow-hidden">
         <AnimatePresence mode="wait">
@@ -96,7 +98,7 @@ const HomePage = () => {
             transition={{ duration: 1.5, ease: "easeOut" }}
             className="absolute inset-0 z-0"
           >
-            <div className="absolute inset-0 bg-gradient-to-b from-white/40 via-white/20 to-white z-10" />
+            <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#fff5eb]/20 to-[#fff5eb] z-10" />
             <img 
               src={SLIDES[current].image} 
               alt="Background" 
@@ -121,7 +123,7 @@ const HomePage = () => {
             key={`title-${current}`}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="text-5xl md:text-8xl font-display font-extrabold tracking-tight leading-[0.9] mb-6 text-slate-900"
+            className="text-5xl md:text-8xl font-display font-extrabold tracking-tight leading-[0.9] mb-6 text-blue-950"
           >
             {SLIDES[current].title.split(" ").map((word, i) => (
               <span key={i} className={word === "segura" || word === "ideal" || word === "inteligente" ? "text-orange-500 block md:inline" : ""}>
@@ -135,7 +137,7 @@ const HomePage = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.4 }}
-            className="text-lg md:text-xl text-slate-600 max-w-2xl mx-auto mb-10 font-medium"
+            className="text-lg md:text-xl text-blue-900/70 max-w-2xl mx-auto mb-10 font-medium"
           >
             {SLIDES[current].subtitle}
           </motion.p>
@@ -152,7 +154,7 @@ const HomePage = () => {
                 EMPEZAR AHORA <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
               </span>
             </Link>
-            <a href="#how-it-works" className="px-8 py-4 rounded-2xl font-bold text-lg border border-slate-200 bg-white text-slate-900 hover:bg-slate-50 transition-all">
+            <a href="#how-it-works" className="px-8 py-4 rounded-2xl font-bold text-lg border border-orange-200 bg-white/50 text-blue-950 hover:bg-orange-50 transition-all backdrop-blur-sm">
               Ver cómo funciona
             </a>
           </motion.div>
@@ -172,13 +174,13 @@ const HomePage = () => {
       </section>
 
       {/* ── How it works ────────────────────────────────────────────────────── */}
-      <section id="how-it-works" className="py-32 px-6 bg-white">
+      <section id="how-it-works" className="py-32 px-6">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-20">
-            <h2 className="text-4xl md:text-6xl font-display font-extrabold mb-6 tracking-tight text-slate-900">
+            <h2 className="text-4xl md:text-6xl font-display font-extrabold mb-6 tracking-tight text-blue-950">
               ¿Cómo <span className="text-orange-500">funciona</span>?
             </h2>
-            <p className="text-slate-500 text-lg max-w-2xl mx-auto">
+            <p className="text-blue-900/60 text-lg max-w-2xl mx-auto font-medium">
               En solo 4 pasos estás conectando con tu futuro roomie de manera segura y divertida.
             </p>
           </div>
@@ -193,14 +195,14 @@ const HomePage = () => {
                 transition={{ delay: i * 0.1 }}
                 className="group relative p-8 rounded-[2.5rem] bg-white border-2 border-slate-100 hover:border-orange-500/50 transition-all duration-500 shadow-xl shadow-slate-200/50"
               >
-                <div className="absolute top-6 right-8 text-5xl font-display font-black text-slate-100 group-hover:text-slate-200 transition-colors">
+                <div className="absolute top-6 right-8 text-5xl font-display font-black text-orange-500/20 group-hover:text-orange-500/30 transition-colors">
                   {step.step}
                 </div>
                 <div className={`w-16 h-16 rounded-2xl ${step.bg} flex items-center justify-center mb-6 text-white shadow-lg shadow-${step.bg.split('-')[1]}-500/30`}>
                   {step.icon}
                 </div>
-                <h3 className="text-xl font-bold mb-3 text-slate-900">{step.title}</h3>
-                <p className="text-slate-500 text-sm leading-relaxed">{step.desc}</p>
+                <h3 className="text-xl font-bold mb-3 text-blue-950">{step.title}</h3>
+                <p className="text-blue-900/60 text-sm leading-relaxed font-medium">{step.desc}</p>
               </motion.div>
             ))}
           </div>
@@ -208,17 +210,17 @@ const HomePage = () => {
       </section>
 
       {/* ── Features ────────────────────────────────────────────────────────── */}
-      <section id="features" className="py-32 px-6 bg-slate-50 relative overflow-hidden">
+      <section id="features" className="py-32 px-6 bg-orange-50/30 relative overflow-hidden">
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
         
         <div className="max-w-7xl mx-auto">
           <div className="grid lg:grid-cols-2 gap-20 items-center">
             <div>
-              <h2 className="text-4xl md:text-6xl font-display font-extrabold mb-8 tracking-tight leading-tight text-slate-900">
+              <h2 className="text-4xl md:text-6xl font-display font-extrabold mb-8 tracking-tight leading-tight text-blue-950">
                 Diseñado para <br />
                 <span className="text-orange-500">vivir sin dramas</span>
               </h2>
-              <p className="text-slate-500 text-lg mb-12 leading-relaxed">
+              <p className="text-blue-900/60 text-lg mb-12 leading-relaxed font-medium">
                 Nos enfocamos en la seguridad y la compatibilidad para que tu única preocupación sea elegir qué película ver el viernes por la noche.
               </p>
               
@@ -228,7 +230,7 @@ const HomePage = () => {
                     <div className="w-6 h-6 rounded-full bg-orange-500/20 flex items-center justify-center">
                       <CheckCircle2 className="w-4 h-4 text-orange-500" />
                     </div>
-                    <span className="font-medium text-slate-700">{item}</span>
+                    <span className="font-bold text-blue-900">{item}</span>
                   </div>
                 ))}
               </div>
@@ -244,11 +246,11 @@ const HomePage = () => {
                   transition={{ delay: i * 0.1 }}
                   className={`p-8 rounded-[2.5rem] border ${f.color} flex flex-col gap-4 hover:scale-105 transition-transform duration-300 bg-white shadow-sm`}
                 >
-                  <div className="w-12 h-12 rounded-xl bg-slate-50 flex items-center justify-center">
+                  <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center">
                     {f.icon}
                   </div>
-                  <h3 className="text-lg font-bold text-slate-900">{f.title}</h3>
-                  <p className="text-sm text-slate-500 leading-relaxed">{f.desc}</p>
+                  <h3 className="text-lg font-bold text-blue-950">{f.title}</h3>
+                  <p className="text-sm text-blue-900/60 leading-relaxed font-medium">{f.desc}</p>
                 </motion.div>
               ))}
             </div>
@@ -257,7 +259,7 @@ const HomePage = () => {
       </section>
 
       {/* ── CTA ────────────────────────────────────────────────────────────── */}
-      <section className="py-32 px-6 bg-white">
+      <section className="py-32 px-6">
         <div className="max-w-5xl mx-auto">
           <div className="relative p-12 md:p-20 rounded-[3rem] bg-orange-500 overflow-hidden text-center">
             <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-white/20 via-transparent to-transparent" />

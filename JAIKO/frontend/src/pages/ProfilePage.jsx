@@ -128,11 +128,11 @@ export default function ProfilePage() {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
               <div>
                 <div className="flex items-center gap-3 flex-wrap justify-center md:justify-start mb-2">
-                  <h1 className="font-display font-extrabold text-3xl sm:text-4xl text-slate-900">{profile.name}</h1>
+                  <h1 className="font-display font-extrabold text-3xl sm:text-4xl text-blue-950">{profile.name}</h1>
                   {profile.verified && <Badge variant="blue" className="bg-blue-50 text-blue-600 border border-blue-100">✓ Verificado</Badge>}
                   {profile.is_looking && !roommate && <Badge variant="orange" className="bg-orange-50 text-orange-600 border border-orange-100">Buscando</Badge>}
                 </div>
-                <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 text-slate-500 font-medium">
+                <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 text-blue-900/60 font-bold">
                   {profile.age && <span className="flex items-center gap-1.5"><Calendar size={16} className="text-orange-500" /> {profile.age} años</span>}
                   {profile.profession && <span className="flex items-center gap-1.5"><Briefcase size={16} className="text-orange-500" /> {profile.profession}</span>}
                   {profile.city && <span className="flex items-center gap-1.5"><MapPin size={16} className="text-orange-500" /> {profile.city}</span>}
@@ -157,7 +157,7 @@ export default function ProfilePage() {
             </div>
 
             {profile.bio && (
-              <p className="text-slate-600 text-lg leading-relaxed max-w-2xl mb-6">{profile.bio}</p>
+              <p className="text-blue-900/80 text-lg leading-relaxed max-w-2xl mb-6 font-medium">{profile.bio}</p>
             )}
 
             {roommate && (
@@ -185,29 +185,29 @@ export default function ProfilePage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
         <div className="md:col-span-2 space-y-8">
           <div className="card">
-            <h2 className="font-display font-extrabold text-2xl text-slate-900 mb-6">Preferencias de convivencia</h2>
+            <h2 className="font-display font-extrabold text-2xl text-blue-950 mb-6">Preferencias de convivencia</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100">
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Presupuesto mensual</p>
+              <div className="p-5 bg-orange-50/50 rounded-2xl border border-orange-100">
+                <p className="text-xs font-bold text-blue-900/40 uppercase tracking-widest mb-3">Presupuesto mensual</p>
                 <p className="text-xl font-display font-extrabold text-blue-600">
                   ₲ {profile.budget_min ? (profile.budget_min / 1000000).toFixed(1) + 'M' : '?'} – {profile.budget_max ? (profile.budget_max / 1000000).toFixed(1) + 'M' : '?'}
                 </p>
               </div>
-              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100">
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Horario habitual</p>
-                <p className="text-xl font-bold text-slate-700 capitalize">{profile.schedule || 'Sin especificar'}</p>
+              <div className="p-5 bg-orange-50/50 rounded-2xl border border-orange-100">
+                <p className="text-xs font-bold text-blue-900/40 uppercase tracking-widest mb-3">Horario habitual</p>
+                <p className="text-xl font-bold text-blue-950 capitalize">{profile.schedule || 'Sin especificar'}</p>
               </div>
-              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+              <div className="p-5 bg-orange-50/50 rounded-2xl border border-orange-100 flex items-center justify-between">
                 <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Mascotas</p>
-                  <p className={`font-bold ${profile.pets ? 'text-emerald-600' : 'text-slate-500'}`}>{profile.pets ? '✓ Tiene mascotas' : '✗ Sin mascotas'}</p>
+                  <p className="text-xs font-bold text-blue-900/40 uppercase tracking-widest mb-1">Mascotas</p>
+                  <p className={`font-bold ${profile.pets ? 'text-emerald-600' : 'text-blue-900/40'}`}>{profile.pets ? '✓ Tiene mascotas' : '✗ Sin mascotas'}</p>
                 </div>
                 <span className="text-2xl">{profile.pets ? '🐾' : '🚫'}</span>
               </div>
-              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+              <div className="p-5 bg-orange-50/50 rounded-2xl border border-orange-100 flex items-center justify-between">
                 <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Fumador</p>
-                  <p className={`font-bold ${profile.smoker ? 'text-orange-600' : 'text-slate-500'}`}>{profile.smoker ? '🚬 Fumador' : '🚭 No fuma'}</p>
+                  <p className="text-xs font-bold text-blue-900/40 uppercase tracking-widest mb-1">Fumador</p>
+                  <p className={`font-bold ${profile.smoker ? 'text-orange-600' : 'text-blue-900/40'}`}>{profile.smoker ? '🚬 Fumador' : '🚭 No fuma'}</p>
                 </div>
                 <span className="text-2xl">{profile.smoker ? '🔥' : '✨'}</span>
               </div>

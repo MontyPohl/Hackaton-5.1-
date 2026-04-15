@@ -3,7 +3,10 @@ import { useNavigate, Link } from "react-router-dom";
 import { Loader2, Eye, EyeOff, Home as HomeIcon, User, Mail, Lock } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { motion } from "motion/react";
+import ReCAPTCHA from "react-google-recaptcha";
 import useAuthStore from "../context/authStore";
+
+import Logo from "../components/ui/Logo";
 
 export default function RegisterPage() {
   const navigate = useNavigate();
@@ -15,68 +18,44 @@ export default function RegisterPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-
-  // Key de reCAPTCHA Enterprise
-  const SITE_KEY = "6LeFE54sAAAAANoCNMtlX1CWET8BuIg6zcy4XE-8";
+  const [captchaToken, setCaptchaToken] = useState(null);
 
   const handleRegister = async (e) => {
     e.preventDefault();
-
     if (!name || !email || !password || !confirmPassword) {
       toast.error("Completá todos los campos");
       return;
     }
-
+    if (!captchaToken) {
+      toast.error("¡Confirmá que no sos un robot!");
+      return;
+    }
     if (password.length < 6) {
       toast.error("La contraseña debe tener al menos 6 caracteres");
       return;
     }
-
     if (password !== confirmPassword) {
       toast.error("Las contraseñas no coinciden");
       return;
     }
 
     setLoading(true);
+    const result = await register({ name, email, password, captcha_token: captchaToken });
+    setLoading(false);
 
-    // Lógica de reCAPTCHA Enterprise
-    const recaptcha = window.grecaptcha?.enterprise;
-
-    if (!recaptcha) {
-      toast.error("El sistema de seguridad no cargó. Refrescá con F5.");
-      setLoading(false);
-      return;
+    if (result.success) {
+      toast.success("¡Cuenta creada! Completá tu perfil");
+      navigate("/profile/edit");
+    } else {
+      toast.error(result.error || "Error al crear la cuenta");
+      if (window.grecaptcha) window.grecaptcha.reset();
+      setCaptchaToken(null);
     }
-
-    recaptcha.ready(async () => {
-      try {
-        const token = await recaptcha.execute(SITE_KEY, { action: 'register' });
-
-        const result = await register({
-          name,
-          email,
-          password,
-          captcha_token: token
-        });
-
-        if (result.success) {
-          toast.success("¡Cuenta creada! Completá tu perfil");
-          navigate("/profile/edit");
-        } else {
-          toast.error(result.error || "Error al crear la cuenta");
-        }
-      } catch (error) {
-        console.error("Error reCAPTCHA:", error);
-        toast.error("Fallo en la validación de seguridad.");
-      } finally {
-        setLoading(false);
-      }
-    });
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50 relative overflow-hidden">
-      {/* Elementos de fondo decorativos */}
+      {/* Background elements */}
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-orange-500/10 blur-[120px] rounded-full" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-600/10 blur-[120px] rounded-full" />
 
@@ -87,15 +66,10 @@ export default function RegisterPage() {
       >
         <div className="text-center mb-10">
           <Link to="/" className="inline-flex items-center gap-2 mb-8">
-            <div className="w-10 h-10 bg-orange-500 rounded-xl flex items-center justify-center shadow-lg shadow-orange-500/20">
-              <HomeIcon className="text-white w-6 h-6" />
-            </div>
-            <span className="text-2xl font-display font-extrabold tracking-tighter text-slate-900">
-              JAIK<span className="text-blue-600">O!</span>
-            </span>
+            <Logo className="w-12 h-12" />
           </Link>
-          <h2 className="text-3xl font-display font-extrabold mb-2 text-slate-900">Creá tu cuenta</h2>
-          <p className="text-slate-500 text-sm">Unite a la comunidad de roomies más grande.</p>
+          <h2 className="text-3xl font-display font-extrabold mb-2 text-blue-950">Creá tu cuenta</h2>
+          <p className="text-blue-900/60 text-sm font-medium">Unite a la comunidad de roomies más grande.</p>
         </div>
 
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-2xl">
@@ -112,7 +86,6 @@ export default function RegisterPage() {
           </div>
 
           <form onSubmit={handleRegister} className="space-y-5">
-            {/* Nombre */}
             <div className="space-y-2">
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Nombre completo</label>
               <div className="relative">
@@ -127,7 +100,6 @@ export default function RegisterPage() {
               </div>
             </div>
 
-            {/* Email */}
             <div className="space-y-2">
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Email</label>
               <div className="relative">
@@ -142,7 +114,6 @@ export default function RegisterPage() {
               </div>
             </div>
 
-            {/* Contraseña */}
             <div className="space-y-2">
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Contraseña</label>
               <div className="relative">
@@ -164,7 +135,6 @@ export default function RegisterPage() {
               </div>
             </div>
 
-            {/* Confirmar Contraseña */}
             <div className="space-y-2">
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Confirmar contraseña</label>
               <div className="relative">
@@ -179,15 +149,26 @@ export default function RegisterPage() {
               </div>
             </div>
 
+            <div className="flex justify-center py-2">
+              <ReCAPTCHA
+                sitekey="6Lc1R44sAAAAAMSJODZW1xsvID2xIMs7g-FUgXJU"
+                onChange={(token) => setCaptchaToken(token)}
+              />
+            </div>
+
             <button
               type="submit"
-              disabled={loading}
-              className={`w-full py-4 rounded-2xl font-bold text-base transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg bg-orange-500 hover:bg-orange-600 text-white shadow-orange-500/20 ${loading ? "opacity-70 cursor-not-allowed" : ""}`}
+              disabled={loading || !captchaToken}
+              className={`w-full py-4 rounded-2xl font-bold text-base transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg ${
+                !captchaToken 
+                ? "bg-slate-200 cursor-not-allowed text-slate-400" 
+                : "bg-orange-500 hover:bg-orange-600 text-white shadow-orange-500/20"
+              }`}
             >
               {loading ? (
                 <>
                   <Loader2 className="animate-spin" size={20} />
-                  Procesando...
+                  Creando cuenta...
                 </>
               ) : (
                 "CREAR CUENTA GRATIS"

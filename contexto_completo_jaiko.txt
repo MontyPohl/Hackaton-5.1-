@@ -1,6 +1,5 @@
 ESTRUCTURA DEL PROYECTO:
 ./
-    .vscode/
     JAIKO/
         backend/
             .env.example
@@ -32,6 +31,7 @@ ESTRUCTURA DEL PROYECTO:
                     upload_routes.py
                     verification_routes.py
                     __init__.py
+                    services/
                 services/
                     matching_service.py
                     notification_service.py
@@ -65,11 +65,11 @@ ESTRUCTURA DEL PROYECTO:
                     ui/
                         index.jsx
                         ListingCard.jsx
+                        Logo.jsx
                         ProfileCard.jsx
                 context/
                     authStore.js
                     notifStore.js
-                hooks/
                 pages/
                     AdminPage.jsx
                     BottomNav.jsx
@@ -92,7 +92,6 @@ ESTRUCTURA DEL PROYECTO:
                     api.js
                     socket.js
                     storage.js
-                utils/
 
 ==================================================
 CONTENIDO DE LOS ARCHIVOS
@@ -4290,8 +4289,28 @@ FILE_PATH: .\JAIKO\frontend\src\components\layout\AdminRoute.jsx
 import { Navigate, Outlet } from 'react-router-dom'
 import useAuthStore from '../../context/authStore'
 
+// ✅ CORRECCIÓN: Agregamos el chequeo de `loading`, igual que ProtectedRoute.
+//
+// Por qué es necesario:
+// Cuando un admin recarga la página en /admin, el store arranca con
+// user = null (aún no hizo fetchMe()). Sin este chequeo, isAdmin()
+// devuelve false inmediatamente → redirige al home ANTES de que el
+// servidor confirme que el usuario es admin → el admin nunca puede
+// acceder recargando directamente en su ruta.
+//
+// Con loading = true, mostramos el spinner mientras fetchMe() termina,
+// y recién entonces evaluamos si es admin o no.
 export default function AdminRoute() {
-  const { isAuthenticated, isAdmin } = useAuthStore()
+  const { isAuthenticated, isAdmin, loading } = useAuthStore()
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64 text-primary-500 font-display text-xl">
+        Cargando...
+      </div>
+    )
+  }
+
   if (!isAuthenticated()) return <Navigate to="/login" replace />
   if (!isAdmin()) return <Navigate to="/" replace />
   return <Outlet />
@@ -4302,7 +4321,10 @@ export default function AdminRoute() {
 FILE_PATH: .\JAIKO\frontend\src\components\layout\Layout.jsx
 ----------------------------------------
 import React, { useState, useEffect } from 'react';
-import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom'; // IMPORTAMOS Outlet
+// ✅ CORRECCIÓN: Importamos Outlet junto con los demás hooks de react-router-dom.
+// Outlet es el "slot" donde React Router v6 inyecta la página hija activa.
+// Sin él, el Layout no sabe dónde poner HomePage, ChatPage, etc.
+import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
 import { 
   Home, 
   Search, 
@@ -4312,15 +4334,17 @@ import {
   LogOut, 
   Menu, 
   X,
-  ShieldCheck
+  MessageSquare,
+  Sparkles
 } from 'lucide-react';
 import useAuthStore from '../../context/authStore';
 import useNotifStore from '../../context/notifStore';
 import { Avatar } from '../ui';
+import Logo from '../ui/Logo';
 import clsx from 'clsx';
 
 const Navbar = () => {
-  const { isAuthenticated, user, profile, logout } = useAuthStore(); // Agregamos logout
+  const { isAuthenticated, user, profile } = useAuthStore();
   const { unread } = useNotifStore();
   const location = useLocation();
   const navigate = useNavigate();
@@ -4336,8 +4360,10 @@ const Navbar = () => {
   const navLinks = [
     { to: '/', label: 'Inicio', icon: Home },
     ...(isAuthenticated() ? [
+      { to: '/search', label: 'Buscar Roomie', icon: Sparkles },
       { to: '/listings', label: 'Departamentos', icon: Search },
       { to: '/groups', label: 'Grupos', icon: Users },
+      { to: '/chat', label: 'Chat', icon: MessageSquare },
     ] : []),
   ];
 
@@ -4346,16 +4372,11 @@ const Navbar = () => {
   return (
     <nav className={clsx(
       'fixed top-0 left-0 w-full z-50 transition-all duration-300 px-6 py-4',
-      isScrolled ? 'bg-white/80 backdrop-blur-lg border-b border-slate-100 py-3' : 'bg-transparent'
+      isScrolled ? 'bg-white/90 backdrop-blur-lg border-b border-orange-100 py-3' : 'bg-transparent'
     )}>
       <div className="max-w-7xl mx-auto flex items-center justify-between">
         <Link to="/" className="flex items-center gap-2 group">
-          <div className="w-10 h-10 bg-orange-500 rounded-xl flex items-center justify-center shadow-lg shadow-orange-500/20 group-hover:scale-110 transition-transform">
-            <ShieldCheck className="text-white w-6 h-6" />
-          </div>
-          <span className="text-2xl font-display font-extrabold tracking-tighter text-slate-900">
-            JAIK<span className="text-blue-600">O!</span>
-          </span>
+          <Logo className="w-10 h-10" />
         </Link>
 
         {/* Desktop Nav */}
@@ -4366,7 +4387,7 @@ const Navbar = () => {
               to={link.to} 
               className={clsx(
                 'text-sm font-bold transition-colors hover:text-orange-500',
-                isActive(link.to) ? 'text-orange-500' : 'text-slate-600'
+                isActive(link.to) ? 'text-blue-600' : 'text-blue-900'
               )}
             >
               {link.label}
@@ -4441,10 +4462,7 @@ const Navbar = () => {
               <Link to="/notifications" onClick={() => setIsOpen(false)} className="flex items-center gap-4 text-2xl font-display font-extrabold text-slate-900">
                 <Bell className="w-6 h-6" /> Notificaciones
               </Link>
-              <button 
-                onClick={() => { logout(); setIsOpen(false); }}
-                className="flex items-center gap-4 text-2xl font-display font-extrabold text-red-500 mt-4"
-              >
+              <button className="flex items-center gap-4 text-2xl font-display font-extrabold text-red-500 mt-4">
                 <LogOut className="w-6 h-6" /> Salir
               </button>
             </>
@@ -4460,48 +4478,86 @@ const Navbar = () => {
   );
 };
 
+const BottomNav = () => {
+  const { isAuthenticated } = useAuthStore();
+  const location = useLocation();
+  
+  if (!isAuthenticated()) return null;
+
+  const mobileLinks = [
+    { to: '/', label: 'Inicio', icon: Home },
+    { to: '/search', label: 'Roomies', icon: Sparkles },
+    { to: '/chat', label: 'Chat', icon: MessageSquare },
+    { to: '/notifications', label: 'Notif', icon: Bell },
+    { to: '/profile', label: 'Perfil', icon: User },
+  ];
+
+  const isActive = (path) => location.pathname === path;
+
+  return (
+    <div className="md:hidden fixed bottom-0 left-0 w-full bg-white/95 backdrop-blur-lg border-t border-orange-100 z-50 px-2 pb-safe">
+      <div className="flex items-center justify-around py-3">
+        {mobileLinks.map((link) => (
+          <Link 
+            key={link.to} 
+            to={link.to} 
+            className={clsx(
+              'flex flex-col items-center gap-1 transition-all duration-300',
+              isActive(link.to) ? 'text-orange-500 scale-110' : 'text-blue-900 opacity-60'
+            )}
+          >
+            <link.icon size={20} strokeWidth={isActive(link.to) ? 2.5 : 2} />
+            <span className="text-[10px] font-bold uppercase tracking-tighter">{link.label}</span>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// ✅ CORRECCIÓN: Eliminamos el prop { children } porque Layout ya NO lo necesita.
+// React Router v6 inyecta la página activa a través de <Outlet />, no por props.
+// Antes: Layout recibía children = undefined → main quedaba vacío → pantalla blanca.
 const Layout = () => {
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
-      <main className="flex-1 pt-20">
-        {/* CORRECCIÓN CLAVE: Outlet renderiza la página actual (Home, Listings, etc.) */}
-        <Outlet /> 
+      <main className="flex-1 pt-20 pb-20 md:pb-0">
+        {/* ✅ CORRECCIÓN CLAVE: <Outlet /> reemplaza a {children}.
+            Outlet es el punto de montaje donde React Router renderiza
+            la ruta hija activa (HomePage, ChatPage, etc.). */}
+        <Outlet />
       </main>
-      <footer className="bg-slate-900 text-white py-20 px-6">
+      <BottomNav />
+      <footer className="hidden md:block bg-blue-950 text-white py-20 px-6">
         <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-12">
           <div className="md:col-span-2">
             <Link to="/" className="flex items-center gap-2 mb-6">
-              <div className="w-10 h-10 bg-orange-500 rounded-xl flex items-center justify-center shadow-lg shadow-orange-500/20">
-                <ShieldCheck className="text-white w-6 h-6" />
-              </div>
-              <span className="text-2xl font-display font-extrabold tracking-tighter text-white">
-                JAIK<span className="text-blue-500">O!</span>
-              </span>
+              <Logo className="w-10 h-10" />
             </Link>
-            <p className="text-slate-400 max-w-sm leading-relaxed">
+            <p className="text-blue-200/60 max-w-sm leading-relaxed">
               La plataforma líder en Paraguay para encontrar el compañero de hogar ideal. Seguridad, rapidez y compatibilidad en un solo lugar.
             </p>
           </div>
           <div>
             <h4 className="font-bold mb-6 text-lg">Plataforma</h4>
-            <ul className="space-y-4 text-slate-400 text-sm">
+            <ul className="space-y-4 text-blue-200/60 text-sm">
+              <li><Link to="/search" className="hover:text-white transition-colors">Buscar Roomies</Link></li>
               <li><Link to="/listings" className="hover:text-white transition-colors">Departamentos</Link></li>
               <li><Link to="/groups" className="hover:text-white transition-colors">Grupos</Link></li>
-              <li><Link to="/search" className="hover:text-white transition-colors">Buscar Roomies</Link></li>
               <li><Link to="/verification" className="hover:text-white transition-colors">Verificación</Link></li>
             </ul>
           </div>
           <div>
             <h4 className="font-bold mb-6 text-lg">Legal</h4>
-            <ul className="space-y-4 text-slate-400 text-sm">
+            <ul className="space-y-4 text-blue-200/60 text-sm">
               <li><a href="#" className="hover:text-white transition-colors">Términos y Condiciones</a></li>
               <li><a href="#" className="hover:text-white transition-colors">Privacidad</a></li>
               <li><a href="#" className="hover:text-white transition-colors">Cookies</a></li>
             </ul>
           </div>
         </div>
-        <div className="max-w-7xl mx-auto border-t border-white/10 mt-20 pt-8 text-center text-slate-500 text-xs font-bold uppercase tracking-widest">
+        <div className="max-w-7xl mx-auto border-t border-white/10 mt-20 pt-8 text-center text-blue-200/30 text-xs font-bold uppercase tracking-widest">
           © {new Date().getFullYear()} JAIKO! — Todos los derechos reservados.
         </div>
       </footer>
@@ -4510,6 +4566,7 @@ const Layout = () => {
 };
 
 export default Layout;
+
 ----------------------------------------
 
 FILE_PATH: .\JAIKO\frontend\src\components\layout\ProtectedRoute.jsx
@@ -4793,16 +4850,16 @@ const ListingCard = ({ listing }) => {
       </div>
       <div className="p-5">
         <div className="flex justify-between items-start mb-2">
-          <h3 className="font-bold text-slate-900 truncate flex-1">{listing.title}</h3>
+          <h3 className="font-bold text-blue-950 truncate flex-1">{listing.title}</h3>
           <p className="font-display font-extrabold text-blue-600 ml-2">
             ₲ {(listing.total_price / 1000000).toFixed(1)}M
           </p>
         </div>
-        <div className="flex items-center gap-1 text-slate-400 text-xs mb-4">
+        <div className="flex items-center gap-1 text-blue-900/40 text-xs mb-4 font-bold">
           <MapPin size={12} />
           <span className="truncate">{listing.neighborhood}, {listing.city}</span>
         </div>
-        <div className="flex items-center gap-4 text-slate-500 text-xs border-t border-slate-50 pt-4">
+        <div className="flex items-center gap-4 text-blue-900/60 text-xs border-t border-orange-50 pt-4 font-bold">
           <div className="flex items-center gap-1">
             <BedDouble size={14} className="text-orange-500" />
             <span>{listing.rooms} hab.</span>
@@ -4818,6 +4875,36 @@ const ListingCard = ({ listing }) => {
 };
 
 export default ListingCard;
+
+----------------------------------------
+
+FILE_PATH: .\JAIKO\frontend\src\components\ui\Logo.jsx
+----------------------------------------
+import React from 'react';
+
+export default function Logo({ className = "w-10 h-10", showText = true }) {
+  return (
+    <div className={`flex items-center gap-2 group ${className}`}>
+      <div className="relative w-full h-full">
+        <img 
+          src="https://files.oaiusercontent.com/file-S8Z7t9v7v7v7v7v7v7v7v7v7" 
+          alt="JAIKO Logo" 
+          className="w-full h-full object-contain drop-shadow-md group-hover:scale-110 transition-transform duration-300"
+          referrerPolicy="no-referrer"
+          onError={(e) => {
+            // Fallback if the URL expires or is invalid
+            e.target.src = "https://picsum.photos/seed/jaiko/200/200";
+          }}
+        />
+      </div>
+      {showText && (
+        <span className="text-2xl font-display font-extrabold tracking-tighter text-slate-900">
+          JAIK<span className="text-blue-600">O!</span>
+        </span>
+      )}
+    </div>
+  );
+}
 
 ----------------------------------------
 
@@ -4839,11 +4926,11 @@ const ProfileCard = ({ profile, compatibility }) => {
           </div>
         )}
       </div>
-      <h3 className="font-display font-extrabold text-lg text-slate-900 mb-1">{profile.name}, {profile.age}</h3>
-      <p className="text-slate-400 text-xs mb-4 flex items-center gap-1">
+      <h3 className="font-display font-extrabold text-lg text-blue-950 mb-1">{profile.name}, {profile.age}</h3>
+      <p className="text-blue-900/40 text-xs mb-4 flex items-center gap-1 font-bold">
         <Briefcase size={12} /> {profile.profession || 'Sin especificar'}
       </p>
-      <div className="flex items-center gap-1 text-slate-500 text-xs mb-6">
+      <div className="flex items-center gap-1 text-blue-900/60 text-xs mb-6 font-bold">
         <MapPin size={12} className="text-orange-500" />
         <span>{profile.city}</span>
       </div>
@@ -5722,12 +5809,11 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Send, ArrowLeft, MessageSquare, MoreVertical, Phone, Video } from 'lucide-react';
 import api from '../services/api';
-import { connectSocket, getSocket, onSocketConnect } from '../services/socket';
+import { getSocket, onSocketConnect } from '../services/socket';
 import useAuthStore from '../context/authStore';
 import { Avatar, Spinner, EmptyState } from '../components/ui';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { toast } from 'react-hot-toast';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -5754,9 +5840,6 @@ export default function ChatPage() {
   const MAX_MESSAGES = 100;
 
   useEffect(() => {
-    // FIX: Inicializar el socket explícitamente para evitar fallos de referencia null
-    connectSocket();
-
     const handleMsg = (msg) => {
       if (msg.chat_id === activeChatIdRef.current) {
         setMessages((m) => {
@@ -5807,12 +5890,11 @@ export default function ChatPage() {
         if (found) selectChat(found);
       }
     });
-  }, [chatId]);
+  }, []);
 
   const selectChat = useCallback(
     async (chat) => {
       const s = socketRef.current;
-      // Salir del chat anterior antes de entrar al nuevo
       if (activeChatIdRef.current && activeChatIdRef.current !== chat.id && s?.connected) {
         s.emit('leave_chat', { chat_id: activeChatIdRef.current });
       }
@@ -5849,13 +5931,7 @@ export default function ChatPage() {
 
   const sendMessage = () => {
     const s = socketRef.current;
-    if (!text.trim() || !activeChatIdRef.current) return;
-
-    if (!s?.connected) {
-      toast.error('Sin conexión al chat. Intentá de nuevo en un momento.');
-      return;
-    }
-
+    if (!text.trim() || !activeChatIdRef.current || !s?.connected) return;
     s.emit('send_message', { chat_id: activeChatIdRef.current, content: text.trim() });
     setText('');
     clearTimeout(typingTimer.current);
@@ -5878,7 +5954,6 @@ export default function ChatPage() {
     ta.style.height = Math.min(ta.scrollHeight, 112) + 'px';
 
     if (s?.connected && activeChatIdRef.current) {
-      // Throttle: emitir typing máximo cada 500ms
       const now = Date.now();
       if (now - lastTypingEmit.current > 500) {
         s.emit('typing', { chat_id: activeChatIdRef.current });
@@ -5918,15 +5993,18 @@ export default function ChatPage() {
       <div className="flex h-full bg-white rounded-[2.5rem] border border-slate-100 shadow-2xl overflow-hidden">
         
         {/* ── Sidebar ─────────────────────────────────────────────────────── */}
-        <div className={clsx(
+        <div
+          className={clsx(
             'flex-shrink-0 border-r border-slate-50 flex flex-col transition-all duration-300',
             'w-full md:w-80 lg:w-96',
             active ? 'hidden md:flex' : 'flex'
-          )}>
+          )}
+        >
           <div className="p-8 border-b border-slate-50">
-            <h1 className="font-display font-extrabold text-3xl text-slate-900 mb-2">Mensajes</h1>
-            <p className="text-slate-400 text-sm font-medium">{chats.length} conversaciones activas</p>
+            <h1 className="font-display font-extrabold text-3xl text-blue-950 mb-2">Mensajes</h1>
+            <p className="text-blue-900/40 text-sm font-bold">{chats.length} conversaciones activas</p>
           </div>
+          
           <div className="flex-1 overflow-y-auto p-4 space-y-2">
             {chats.length === 0 ? (
               <div className="py-20 text-center">
@@ -5935,27 +6013,32 @@ export default function ChatPage() {
               </div>
             ) : (
               chats.map((chat) => (
-                <button key={chat.id} onClick={() => selectChat(chat)}
+                <button
+                  key={chat.id}
+                  onClick={() => selectChat(chat)}
                   className={clsx(
                     'w-full flex items-center gap-4 p-4 rounded-3xl transition-all text-left group',
-                    active?.id === chat.id ? 'bg-blue-50 border-blue-100' : 'hover:bg-slate-50 border-transparent'
-                  )}>
+                    active?.id === chat.id 
+                      ? 'bg-blue-50 border-blue-100' 
+                      : 'hover:bg-slate-50 border-transparent'
+                  )}
+                >
                   <Avatar src={getChatPhoto(chat)} name={getChatName(chat)} size="md" className="border-2 border-white shadow-sm" />
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-center mb-1">
-                      <p className={clsx('font-bold truncate', active?.id === chat.id ? 'text-blue-700' : 'text-slate-900')}>
+                      <p className={clsx('font-bold truncate', active?.id === chat.id ? 'text-blue-700' : 'text-blue-950')}>
                         {getChatName(chat)}
                       </p>
                       {chat.last_message && (
-                        <span className="text-[10px] text-slate-400 font-bold uppercase">
+                        <span className="text-[10px] text-blue-900/40 font-bold uppercase">
                           {formatDistanceToNow(new Date(chat.last_message.created_at), { locale: es })}
                         </span>
                       )}
                     </div>
                     {chat.last_message ? (
-                      <p className="text-xs text-slate-400 truncate font-medium">{chat.last_message.content}</p>
+                      <p className="text-xs text-blue-900/40 truncate font-bold">{chat.last_message.content}</p>
                     ) : (
-                      <p className="text-xs text-slate-300 italic">Inicia una conversación</p>
+                      <p className="text-xs text-blue-900/20 italic">Inicia una conversación</p>
                     )}
                   </div>
                 </button>
@@ -5964,7 +6047,7 @@ export default function ChatPage() {
           </div>
         </div>
 
-        {/* ── Chat Panel ──────────────────────────────────────────────────── */}
+        {/* ── Chat panel ──────────────────────────────────────────────────── */}
         <div className={clsx(
           'flex-col flex-1 bg-slate-50/30',
           active ? 'flex' : 'hidden md:flex'
@@ -5974,45 +6057,74 @@ export default function ChatPage() {
               {/* Header */}
               <div className="flex items-center justify-between p-6 bg-white border-b border-slate-50">
                 <div className="flex items-center gap-4">
-                  <button className="md:hidden p-2 rounded-xl hover:bg-slate-100 text-slate-400 transition-all" onClick={handleBack}>
+                  <button
+                    className="md:hidden p-2 rounded-xl hover:bg-slate-100 text-slate-400 transition-all"
+                    onClick={handleBack}
+                  >
                     <ArrowLeft size={20} />
                   </button>
                   <Avatar src={getChatPhoto(active)} name={getChatName(active)} size="md" className="border-2 border-slate-100" />
                   <div>
-                    <p className="font-display font-extrabold text-slate-900">{getChatName(active)}</p>
-                    {typing ? (
-                      <p className="text-[10px] font-bold text-blue-500 uppercase tracking-widest animate-pulse">Escribiendo...</p>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">En línea</p>
-                      </div>
-                    )}
+                    <p className="font-display font-extrabold text-blue-950">{getChatName(active)}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      <p className="text-[10px] font-bold text-blue-900/40 uppercase tracking-widest">En línea</p>
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button className="p-2.5 rounded-xl text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all"><Phone size={20} /></button>
-                  <button className="p-2.5 rounded-xl text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all"><Video size={20} /></button>
-                  <button className="p-2.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all"><MoreVertical size={20} /></button>
+                  <button className="p-2.5 rounded-xl text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all">
+                    <Phone size={20} />
+                  </button>
+                  <button className="p-2.5 rounded-xl text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all">
+                    <Video size={20} />
+                  </button>
+                  <button className="p-2.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all">
+                    <MoreVertical size={20} />
+                  </button>
                 </div>
               </div>
 
               {/* Messages */}
               <div className="flex-1 overflow-y-auto p-8 space-y-6">
-                {loading && <div className="flex justify-center py-10"><Spinner size="lg" /></div>}
+                {loading && (
+                  <div className="flex justify-center py-10">
+                    <Spinner size="lg" />
+                  </div>
+                )}
                 <AnimatePresence initial={false}>
                   {messages.map((msg, i) => {
                     const isMe = msg.sender_id === user?.id;
                     const showAvatar = !isMe && (i === 0 || messages[i-1].sender_id !== msg.sender_id);
+                    
                     return (
-                      <motion.div key={msg.id} initial={{ opacity: 0, y: 10, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }}
-                        className={clsx('flex items-end gap-3', isMe ? 'flex-row-reverse' : 'flex-row')}>
+                      <motion.div
+                        key={msg.id}
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        className={clsx(
+                          'flex items-end gap-3',
+                          isMe ? 'flex-row-reverse' : 'flex-row'
+                        )}
+                      >
                         <div className="w-8 flex-shrink-0">
-                          {showAvatar && <Avatar src={msg.sender_photo} name={msg.sender_name} size="sm" className="w-8 h-8" />}
+                          {showAvatar && (
+                            <Avatar src={msg.sender_photo} name={msg.sender_name} size="sm" className="w-8 h-8" />
+                          )}
                         </div>
-                        <div className={clsx('max-w-[70%] px-5 py-3.5 rounded-[1.5rem] text-sm shadow-sm relative group', isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white text-slate-700 border border-slate-100 rounded-bl-none')}>
+                        <div
+                          className={clsx(
+                            'max-w-[70%] px-5 py-3.5 rounded-[1.5rem] text-sm shadow-sm relative group',
+                            isMe
+                              ? 'bg-blue-600 text-white rounded-br-none'
+                              : 'bg-white text-slate-700 border border-slate-100 rounded-bl-none'
+                          )}
+                        >
                           <p className="leading-relaxed break-words font-medium">{msg.content}</p>
-                          <p className={clsx('text-[9px] font-bold uppercase tracking-widest mt-2 opacity-0 group-hover:opacity-60 transition-opacity', isMe ? 'text-white' : 'text-slate-400')}>
+                          <p className={clsx(
+                            'text-[9px] font-bold uppercase tracking-widest mt-2 opacity-0 group-hover:opacity-60 transition-opacity',
+                            isMe ? 'text-white' : 'text-slate-400'
+                          )}>
                             {formatDistanceToNow(new Date(msg.created_at), { locale: es })}
                           </p>
                         </div>
@@ -6020,19 +6132,38 @@ export default function ChatPage() {
                     );
                   })}
                 </AnimatePresence>
+                {typing && (
+                  <div className="flex items-center gap-2 text-blue-600 font-bold text-[10px] uppercase tracking-widest animate-pulse ml-11">
+                    <span className="flex gap-1">
+                      <span className="w-1 h-1 bg-blue-600 rounded-full animate-bounce" />
+                      <span className="w-1 h-1 bg-blue-600 rounded-full animate-bounce [animation-delay:0.2s]" />
+                      <span className="w-1 h-1 bg-blue-600 rounded-full animate-bounce [animation-delay:0.4s]" />
+                    </span>
+                    Escribiendo...
+                  </div>
+                )}
                 <div ref={bottomRef} />
               </div>
 
               {/* Input */}
               <div className="p-6 bg-white border-t border-slate-50 flex items-end gap-4">
                 <div className="flex-1 relative">
-                  <textarea ref={textareaRef} value={text} onChange={handleTypingInput} onKeyDown={handleKeyDown} rows={1} placeholder="Escribí un mensaje..."
+                  <textarea
+                    ref={textareaRef}
+                    value={text}
+                    onChange={handleTypingInput}
+                    onKeyDown={handleKeyDown}
+                    rows={1}
+                    placeholder="Escribí un mensaje..."
                     className="w-full bg-slate-50 border border-slate-100 rounded-[1.5rem] px-6 py-4 text-sm focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all resize-none leading-relaxed"
                     style={{ maxHeight: '112px' }}
                   />
                 </div>
-                <button onClick={sendMessage} disabled={!text.trim()}
-                  className="w-14 h-14 bg-orange-500 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-orange-500/20 hover:bg-orange-600 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:pointer-events-none">
+                <button
+                  onClick={sendMessage}
+                  disabled={!text.trim()}
+                  className="w-14 h-14 bg-orange-500 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-orange-500/20 hover:bg-orange-600 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:pointer-events-none"
+                >
                   <Send size={22} className="ml-1" />
                 </button>
               </div>
@@ -6051,6 +6182,7 @@ export default function ChatPage() {
     </div>
   );
 }
+
 ----------------------------------------
 
 FILE_PATH: .\JAIKO\frontend\src\pages\CreateListingPage.jsx
@@ -7090,6 +7222,8 @@ import {
   ChevronRight
 } from "lucide-react";
 
+import Logo from "../components/ui/Logo"; // <-- Esta ruta está bien si la carpeta components está en la raíz.
+
 const FEATURES = [
   { 
     icon: <ShieldCheck className="w-6 h-6" />, 
@@ -7159,7 +7293,7 @@ const HomePage = () => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen">
       {/* ── Hero ───────────────────────────────────────────────────────────── */}
       <section className="relative h-screen min-h-[700px] flex items-center justify-center overflow-hidden">
         <AnimatePresence mode="wait">
@@ -7171,7 +7305,7 @@ const HomePage = () => {
             transition={{ duration: 1.5, ease: "easeOut" }}
             className="absolute inset-0 z-0"
           >
-            <div className="absolute inset-0 bg-gradient-to-b from-white/40 via-white/20 to-white z-10" />
+            <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#fff5eb]/20 to-[#fff5eb] z-10" />
             <img 
               src={SLIDES[current].image} 
               alt="Background" 
@@ -7196,7 +7330,7 @@ const HomePage = () => {
             key={`title-${current}`}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="text-5xl md:text-8xl font-display font-extrabold tracking-tight leading-[0.9] mb-6 text-slate-900"
+            className="text-5xl md:text-8xl font-display font-extrabold tracking-tight leading-[0.9] mb-6 text-blue-950"
           >
             {SLIDES[current].title.split(" ").map((word, i) => (
               <span key={i} className={word === "segura" || word === "ideal" || word === "inteligente" ? "text-orange-500 block md:inline" : ""}>
@@ -7210,7 +7344,7 @@ const HomePage = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.4 }}
-            className="text-lg md:text-xl text-slate-600 max-w-2xl mx-auto mb-10 font-medium"
+            className="text-lg md:text-xl text-blue-900/70 max-w-2xl mx-auto mb-10 font-medium"
           >
             {SLIDES[current].subtitle}
           </motion.p>
@@ -7227,7 +7361,7 @@ const HomePage = () => {
                 EMPEZAR AHORA <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
               </span>
             </Link>
-            <a href="#how-it-works" className="px-8 py-4 rounded-2xl font-bold text-lg border border-slate-200 bg-white text-slate-900 hover:bg-slate-50 transition-all">
+            <a href="#how-it-works" className="px-8 py-4 rounded-2xl font-bold text-lg border border-orange-200 bg-white/50 text-blue-950 hover:bg-orange-50 transition-all backdrop-blur-sm">
               Ver cómo funciona
             </a>
           </motion.div>
@@ -7247,13 +7381,13 @@ const HomePage = () => {
       </section>
 
       {/* ── How it works ────────────────────────────────────────────────────── */}
-      <section id="how-it-works" className="py-32 px-6 bg-white">
+      <section id="how-it-works" className="py-32 px-6">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-20">
-            <h2 className="text-4xl md:text-6xl font-display font-extrabold mb-6 tracking-tight text-slate-900">
+            <h2 className="text-4xl md:text-6xl font-display font-extrabold mb-6 tracking-tight text-blue-950">
               ¿Cómo <span className="text-orange-500">funciona</span>?
             </h2>
-            <p className="text-slate-500 text-lg max-w-2xl mx-auto">
+            <p className="text-blue-900/60 text-lg max-w-2xl mx-auto font-medium">
               En solo 4 pasos estás conectando con tu futuro roomie de manera segura y divertida.
             </p>
           </div>
@@ -7268,14 +7402,14 @@ const HomePage = () => {
                 transition={{ delay: i * 0.1 }}
                 className="group relative p-8 rounded-[2.5rem] bg-white border-2 border-slate-100 hover:border-orange-500/50 transition-all duration-500 shadow-xl shadow-slate-200/50"
               >
-                <div className="absolute top-6 right-8 text-5xl font-display font-black text-slate-100 group-hover:text-slate-200 transition-colors">
+                <div className="absolute top-6 right-8 text-5xl font-display font-black text-orange-500/20 group-hover:text-orange-500/30 transition-colors">
                   {step.step}
                 </div>
                 <div className={`w-16 h-16 rounded-2xl ${step.bg} flex items-center justify-center mb-6 text-white shadow-lg shadow-${step.bg.split('-')[1]}-500/30`}>
                   {step.icon}
                 </div>
-                <h3 className="text-xl font-bold mb-3 text-slate-900">{step.title}</h3>
-                <p className="text-slate-500 text-sm leading-relaxed">{step.desc}</p>
+                <h3 className="text-xl font-bold mb-3 text-blue-950">{step.title}</h3>
+                <p className="text-blue-900/60 text-sm leading-relaxed font-medium">{step.desc}</p>
               </motion.div>
             ))}
           </div>
@@ -7283,17 +7417,17 @@ const HomePage = () => {
       </section>
 
       {/* ── Features ────────────────────────────────────────────────────────── */}
-      <section id="features" className="py-32 px-6 bg-slate-50 relative overflow-hidden">
+      <section id="features" className="py-32 px-6 bg-orange-50/30 relative overflow-hidden">
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
         
         <div className="max-w-7xl mx-auto">
           <div className="grid lg:grid-cols-2 gap-20 items-center">
             <div>
-              <h2 className="text-4xl md:text-6xl font-display font-extrabold mb-8 tracking-tight leading-tight text-slate-900">
+              <h2 className="text-4xl md:text-6xl font-display font-extrabold mb-8 tracking-tight leading-tight text-blue-950">
                 Diseñado para <br />
                 <span className="text-orange-500">vivir sin dramas</span>
               </h2>
-              <p className="text-slate-500 text-lg mb-12 leading-relaxed">
+              <p className="text-blue-900/60 text-lg mb-12 leading-relaxed font-medium">
                 Nos enfocamos en la seguridad y la compatibilidad para que tu única preocupación sea elegir qué película ver el viernes por la noche.
               </p>
               
@@ -7303,7 +7437,7 @@ const HomePage = () => {
                     <div className="w-6 h-6 rounded-full bg-orange-500/20 flex items-center justify-center">
                       <CheckCircle2 className="w-4 h-4 text-orange-500" />
                     </div>
-                    <span className="font-medium text-slate-700">{item}</span>
+                    <span className="font-bold text-blue-900">{item}</span>
                   </div>
                 ))}
               </div>
@@ -7319,11 +7453,11 @@ const HomePage = () => {
                   transition={{ delay: i * 0.1 }}
                   className={`p-8 rounded-[2.5rem] border ${f.color} flex flex-col gap-4 hover:scale-105 transition-transform duration-300 bg-white shadow-sm`}
                 >
-                  <div className="w-12 h-12 rounded-xl bg-slate-50 flex items-center justify-center">
+                  <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center">
                     {f.icon}
                   </div>
-                  <h3 className="text-lg font-bold text-slate-900">{f.title}</h3>
-                  <p className="text-sm text-slate-500 leading-relaxed">{f.desc}</p>
+                  <h3 className="text-lg font-bold text-blue-950">{f.title}</h3>
+                  <p className="text-sm text-blue-900/60 leading-relaxed font-medium">{f.desc}</p>
                 </motion.div>
               ))}
             </div>
@@ -7332,7 +7466,7 @@ const HomePage = () => {
       </section>
 
       {/* ── CTA ────────────────────────────────────────────────────────────── */}
-      <section className="py-32 px-6 bg-white">
+      <section className="py-32 px-6">
         <div className="max-w-5xl mx-auto">
           <div className="relative p-12 md:p-20 rounded-[3rem] bg-orange-500 overflow-hidden text-center">
             <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-white/20 via-transparent to-transparent" />
@@ -7579,26 +7713,15 @@ const CITY_CENTERS = {
   'Ciudad del Este': [-25.5097, -54.611],
 };
 
-// Persistencia de ciudad en localStorage
-const getSavedCity = () => {
-  try { return localStorage.getItem('jaiko_listings_city') || 'Asunción' } catch { return 'Asunción' }
-}
-const saveCity = (city) => {
-  try { localStorage.setItem('jaiko_listings_city', city) } catch { }
-}
-
 export default function ListingsPage() {
   const { isAuthenticated } = useAuthStore();
   const [listings, setListings] = useState([]);
-  const [roomies, setRoomies] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [roomiesLoading, setRoomiesLoading] = useState(false);
   const [view, setView] = useState('grid');
   const [showFilters, setShowFilters] = useState(false);
-  const [JaikoMap, setJaikoMap] = useState(null);
 
   const [filters, setFilters] = useState({
-    city: getSavedCity(),
+    city: 'Asunción',
     min_price: '',
     max_price: '',
     pets_allowed: '',
@@ -7606,7 +7729,6 @@ export default function ListingsPage() {
     type: '',
   });
 
-  // ── Cargar listings según filtros ─────────────────────────────────────────
   useEffect(() => {
     const params = new URLSearchParams({ page: 1, per_page: 24, city: filters.city });
     if (filters.min_price) params.set('min_price', filters.min_price);
@@ -7622,41 +7744,10 @@ export default function ListingsPage() {
       .finally(() => setLoading(false));
   }, [filters]);
 
-  // ── Lazy-load JaikoMap ────────────────────────────────────────────────────
-  useEffect(() => {
-    if (view === 'map' && !JaikoMap) {
-      import('../components/map/JaikoMap').then(m => setJaikoMap(() => m.default))
-    }
-  }, [view, JaikoMap]);
-
-  // ── Roomies para el mapa ──────────────────────────────────────────────────
-  useEffect(() => {
-    if (view !== 'map') return;
-    if (!isAuthenticated()) { setRoomies([]); return; }
-    setRoomiesLoading(true);
-    getRoomies(filters.city)
-      .then(setRoomies)
-      .catch(() => setRoomies([]))
-      .finally(() => setRoomiesLoading(false));
-  }, [view, filters.city, isAuthenticated]);
-
-  const setCity = (city) => {
-    saveCity(city);
-    setFilters(f => ({ ...f, city }));
-  }
-
   const activeFilterCount = [
     filters.min_price, filters.max_price, filters.pets_allowed,
     filters.smoking_allowed, filters.type
   ].filter(Boolean).length;
-
-  const listingMarkers = listings
-    .filter(l => l.latitude != null && l.longitude != null && isFinite(l.latitude) && isFinite(l.longitude))
-    .map(l => ({ lat: l.latitude, lng: l.longitude, id: l.id, title: l.title, price: l.total_price, neighborhood: l.neighborhood }));
-
-  const roomiMarkers = roomies.filter(r => r?.lat != null && r?.lng != null && isFinite(r.lat) && isFinite(r.lng) && r.profile);
-
-  const mapCenter = CITY_CENTERS[filters.city] || [-25.2867, -57.647];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
@@ -7713,7 +7804,7 @@ export default function ListingsPage() {
             <select
               className="input"
               value={filters.city}
-              onChange={e => setCity(e.target.value)}
+              onChange={e => setFilters(f => ({ ...f, city: e.target.value }))}
             >
               {CITIES.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
@@ -7734,24 +7825,24 @@ export default function ListingsPage() {
           </div>
 
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Precio mín (₲)</label>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Precio mín</label>
             <input
-              type="text" inputMode="numeric"
+              type="number"
               className="input"
               value={filters.min_price}
               placeholder="0"
-              onChange={e => setFilters(f => ({ ...f, min_price: e.target.value.replace(/[^0-9]/g, '') }))}
+              onChange={e => setFilters(f => ({ ...f, min_price: e.target.value }))}
             />
           </div>
 
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Precio máx (₲)</label>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Precio máx</label>
             <input
-              type="text" inputMode="numeric"
+              type="number"
               className="input"
               value={filters.max_price}
               placeholder="Sin límite"
-              onChange={e => setFilters(f => ({ ...f, max_price: e.target.value.replace(/[^0-9]/g, '') }))}
+              onChange={e => setFilters(f => ({ ...f, max_price: e.target.value }))}
             />
           </div>
 
@@ -7784,33 +7875,6 @@ export default function ListingsPage() {
       {/* ── Content ───────────────────────────────────────────────────────── */}
       {loading ? (
         <div className="flex justify-center py-32"><Spinner size="lg" /></div>
-      ) : view === 'map' ? (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500">
-            <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-full bg-blue-500" />
-              {listingMarkers.length} departamentos
-            </span>
-            {isAuthenticated() && (
-              <span className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-full bg-orange-400" />
-                {roomiesLoading ? 'Cargando roomies...' : `${roomiMarkers.length} roomies compatibles`}
-              </span>
-            )}
-            {!isAuthenticated() && (
-              <span className="text-xs text-orange-400 italic">
-                Iniciá sesión para ver roomies compatibles en el mapa
-              </span>
-            )}
-          </div>
-          <div className="h-[600px] rounded-3xl overflow-hidden border border-slate-100 shadow-xl shadow-slate-200/50">
-            {JaikoMap ? (
-              <JaikoMap center={mapCenter} markers={roomiMarkers} listingMarkers={listingMarkers} height="600px" />
-            ) : (
-              <div className="flex justify-center items-center h-full bg-slate-50"><Spinner /></div>
-            )}
-          </div>
-        </div>
       ) : listings.length === 0 ? (
         <EmptyState icon="🏠" title="No hay publicaciones" description="Sé el primero en publicar en esta ciudad." />
       ) : (
@@ -7821,6 +7885,7 @@ export default function ListingsPage() {
     </div>
   );
 }
+
 ----------------------------------------
 
 FILE_PATH: .\JAIKO\frontend\src\pages\LoginPage.jsx
@@ -7832,6 +7897,8 @@ import { GoogleLogin } from "@react-oauth/google";
 import { toast } from "react-hot-toast";
 import { motion } from "motion/react";
 import useAuthStore from "../context/authStore";
+
+import Logo from "../components/ui/Logo";
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -7848,7 +7915,7 @@ export default function LoginPage() {
     if (token) {
       localStorage.setItem("jaiko_token", token);
       toast.success("¡Bienvenido a Jaiko!");
-      navigate("/profile");
+      navigate("/search");
     }
   }, [navigate]);
 
@@ -7856,7 +7923,7 @@ export default function LoginPage() {
     if (role === "admin" || role === "verifier") {
       navigate("/admin");
     } else {
-      navigate("/profile");
+      navigate("/search");
     }
   };
 
@@ -7905,15 +7972,10 @@ export default function LoginPage() {
       >
         <div className="text-center mb-10">
           <Link to="/" className="inline-flex items-center gap-2 mb-8">
-            <div className="w-10 h-10 bg-orange-500 rounded-xl flex items-center justify-center shadow-lg shadow-orange-500/20">
-              <HomeIcon className="text-white w-6 h-6" />
-            </div>
-            <span className="text-2xl font-display font-extrabold tracking-tighter text-slate-900">
-              JAIK<span className="text-blue-600">O!</span>
-            </span>
+            <Logo className="w-12 h-12" />
           </Link>
-          <h2 className="text-3xl font-display font-extrabold mb-2 text-slate-900">¡Hola de nuevo!</h2>
-          <p className="text-slate-500 text-sm">Ingresá tus datos para continuar.</p>
+          <h2 className="text-3xl font-display font-extrabold mb-2 text-blue-950">¡Hola de nuevo!</h2>
+          <p className="text-blue-900/60 text-sm font-medium">Ingresá tus datos para continuar.</p>
         </div>
 
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-2xl">
@@ -8293,11 +8355,11 @@ export default function ProfilePage() {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
               <div>
                 <div className="flex items-center gap-3 flex-wrap justify-center md:justify-start mb-2">
-                  <h1 className="font-display font-extrabold text-3xl sm:text-4xl text-slate-900">{profile.name}</h1>
+                  <h1 className="font-display font-extrabold text-3xl sm:text-4xl text-blue-950">{profile.name}</h1>
                   {profile.verified && <Badge variant="blue" className="bg-blue-50 text-blue-600 border border-blue-100">✓ Verificado</Badge>}
                   {profile.is_looking && !roommate && <Badge variant="orange" className="bg-orange-50 text-orange-600 border border-orange-100">Buscando</Badge>}
                 </div>
-                <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 text-slate-500 font-medium">
+                <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 text-blue-900/60 font-bold">
                   {profile.age && <span className="flex items-center gap-1.5"><Calendar size={16} className="text-orange-500" /> {profile.age} años</span>}
                   {profile.profession && <span className="flex items-center gap-1.5"><Briefcase size={16} className="text-orange-500" /> {profile.profession}</span>}
                   {profile.city && <span className="flex items-center gap-1.5"><MapPin size={16} className="text-orange-500" /> {profile.city}</span>}
@@ -8322,7 +8384,7 @@ export default function ProfilePage() {
             </div>
 
             {profile.bio && (
-              <p className="text-slate-600 text-lg leading-relaxed max-w-2xl mb-6">{profile.bio}</p>
+              <p className="text-blue-900/80 text-lg leading-relaxed max-w-2xl mb-6 font-medium">{profile.bio}</p>
             )}
 
             {roommate && (
@@ -8350,29 +8412,29 @@ export default function ProfilePage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
         <div className="md:col-span-2 space-y-8">
           <div className="card">
-            <h2 className="font-display font-extrabold text-2xl text-slate-900 mb-6">Preferencias de convivencia</h2>
+            <h2 className="font-display font-extrabold text-2xl text-blue-950 mb-6">Preferencias de convivencia</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100">
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Presupuesto mensual</p>
+              <div className="p-5 bg-orange-50/50 rounded-2xl border border-orange-100">
+                <p className="text-xs font-bold text-blue-900/40 uppercase tracking-widest mb-3">Presupuesto mensual</p>
                 <p className="text-xl font-display font-extrabold text-blue-600">
                   ₲ {profile.budget_min ? (profile.budget_min / 1000000).toFixed(1) + 'M' : '?'} – {profile.budget_max ? (profile.budget_max / 1000000).toFixed(1) + 'M' : '?'}
                 </p>
               </div>
-              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100">
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Horario habitual</p>
-                <p className="text-xl font-bold text-slate-700 capitalize">{profile.schedule || 'Sin especificar'}</p>
+              <div className="p-5 bg-orange-50/50 rounded-2xl border border-orange-100">
+                <p className="text-xs font-bold text-blue-900/40 uppercase tracking-widest mb-3">Horario habitual</p>
+                <p className="text-xl font-bold text-blue-950 capitalize">{profile.schedule || 'Sin especificar'}</p>
               </div>
-              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+              <div className="p-5 bg-orange-50/50 rounded-2xl border border-orange-100 flex items-center justify-between">
                 <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Mascotas</p>
-                  <p className={`font-bold ${profile.pets ? 'text-emerald-600' : 'text-slate-500'}`}>{profile.pets ? '✓ Tiene mascotas' : '✗ Sin mascotas'}</p>
+                  <p className="text-xs font-bold text-blue-900/40 uppercase tracking-widest mb-1">Mascotas</p>
+                  <p className={`font-bold ${profile.pets ? 'text-emerald-600' : 'text-blue-900/40'}`}>{profile.pets ? '✓ Tiene mascotas' : '✗ Sin mascotas'}</p>
                 </div>
                 <span className="text-2xl">{profile.pets ? '🐾' : '🚫'}</span>
               </div>
-              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+              <div className="p-5 bg-orange-50/50 rounded-2xl border border-orange-100 flex items-center justify-between">
                 <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Fumador</p>
-                  <p className={`font-bold ${profile.smoker ? 'text-orange-600' : 'text-slate-500'}`}>{profile.smoker ? '🚬 Fumador' : '🚭 No fuma'}</p>
+                  <p className="text-xs font-bold text-blue-900/40 uppercase tracking-widest mb-1">Fumador</p>
+                  <p className={`font-bold ${profile.smoker ? 'text-orange-600' : 'text-blue-900/40'}`}>{profile.smoker ? '🚬 Fumador' : '🚭 No fuma'}</p>
                 </div>
                 <span className="text-2xl">{profile.smoker ? '🔥' : '✨'}</span>
               </div>
@@ -8468,7 +8530,10 @@ import { useNavigate, Link } from "react-router-dom";
 import { Loader2, Eye, EyeOff, Home as HomeIcon, User, Mail, Lock } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { motion } from "motion/react";
+import ReCAPTCHA from "react-google-recaptcha";
 import useAuthStore from "../context/authStore";
+
+import Logo from "../components/ui/Logo";
 
 export default function RegisterPage() {
   const navigate = useNavigate();
@@ -8480,68 +8545,44 @@ export default function RegisterPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-
-  // Key de reCAPTCHA Enterprise
-  const SITE_KEY = "6LeFE54sAAAAANoCNMtlX1CWET8BuIg6zcy4XE-8";
+  const [captchaToken, setCaptchaToken] = useState(null);
 
   const handleRegister = async (e) => {
     e.preventDefault();
-
     if (!name || !email || !password || !confirmPassword) {
       toast.error("Completá todos los campos");
       return;
     }
-
+    if (!captchaToken) {
+      toast.error("¡Confirmá que no sos un robot!");
+      return;
+    }
     if (password.length < 6) {
       toast.error("La contraseña debe tener al menos 6 caracteres");
       return;
     }
-
     if (password !== confirmPassword) {
       toast.error("Las contraseñas no coinciden");
       return;
     }
 
     setLoading(true);
+    const result = await register({ name, email, password, captcha_token: captchaToken });
+    setLoading(false);
 
-    // Lógica de reCAPTCHA Enterprise
-    const recaptcha = window.grecaptcha?.enterprise;
-
-    if (!recaptcha) {
-      toast.error("El sistema de seguridad no cargó. Refrescá con F5.");
-      setLoading(false);
-      return;
+    if (result.success) {
+      toast.success("¡Cuenta creada! Completá tu perfil");
+      navigate("/profile/edit");
+    } else {
+      toast.error(result.error || "Error al crear la cuenta");
+      if (window.grecaptcha) window.grecaptcha.reset();
+      setCaptchaToken(null);
     }
-
-    recaptcha.ready(async () => {
-      try {
-        const token = await recaptcha.execute(SITE_KEY, { action: 'register' });
-
-        const result = await register({
-          name,
-          email,
-          password,
-          captcha_token: token
-        });
-
-        if (result.success) {
-          toast.success("¡Cuenta creada! Completá tu perfil");
-          navigate("/profile/edit");
-        } else {
-          toast.error(result.error || "Error al crear la cuenta");
-        }
-      } catch (error) {
-        console.error("Error reCAPTCHA:", error);
-        toast.error("Fallo en la validación de seguridad.");
-      } finally {
-        setLoading(false);
-      }
-    });
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50 relative overflow-hidden">
-      {/* Elementos de fondo decorativos */}
+      {/* Background elements */}
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-orange-500/10 blur-[120px] rounded-full" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-600/10 blur-[120px] rounded-full" />
 
@@ -8552,15 +8593,10 @@ export default function RegisterPage() {
       >
         <div className="text-center mb-10">
           <Link to="/" className="inline-flex items-center gap-2 mb-8">
-            <div className="w-10 h-10 bg-orange-500 rounded-xl flex items-center justify-center shadow-lg shadow-orange-500/20">
-              <HomeIcon className="text-white w-6 h-6" />
-            </div>
-            <span className="text-2xl font-display font-extrabold tracking-tighter text-slate-900">
-              JAIK<span className="text-blue-600">O!</span>
-            </span>
+            <Logo className="w-12 h-12" />
           </Link>
-          <h2 className="text-3xl font-display font-extrabold mb-2 text-slate-900">Creá tu cuenta</h2>
-          <p className="text-slate-500 text-sm">Unite a la comunidad de roomies más grande.</p>
+          <h2 className="text-3xl font-display font-extrabold mb-2 text-blue-950">Creá tu cuenta</h2>
+          <p className="text-blue-900/60 text-sm font-medium">Unite a la comunidad de roomies más grande.</p>
         </div>
 
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-2xl">
@@ -8577,7 +8613,6 @@ export default function RegisterPage() {
           </div>
 
           <form onSubmit={handleRegister} className="space-y-5">
-            {/* Nombre */}
             <div className="space-y-2">
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Nombre completo</label>
               <div className="relative">
@@ -8592,7 +8627,6 @@ export default function RegisterPage() {
               </div>
             </div>
 
-            {/* Email */}
             <div className="space-y-2">
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Email</label>
               <div className="relative">
@@ -8607,7 +8641,6 @@ export default function RegisterPage() {
               </div>
             </div>
 
-            {/* Contraseña */}
             <div className="space-y-2">
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Contraseña</label>
               <div className="relative">
@@ -8629,7 +8662,6 @@ export default function RegisterPage() {
               </div>
             </div>
 
-            {/* Confirmar Contraseña */}
             <div className="space-y-2">
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Confirmar contraseña</label>
               <div className="relative">
@@ -8644,15 +8676,26 @@ export default function RegisterPage() {
               </div>
             </div>
 
+            <div className="flex justify-center py-2">
+              <ReCAPTCHA
+                sitekey="6Lc1R44sAAAAAMSJODZW1xsvID2xIMs7g-FUgXJU"
+                onChange={(token) => setCaptchaToken(token)}
+              />
+            </div>
+
             <button
               type="submit"
-              disabled={loading}
-              className={`w-full py-4 rounded-2xl font-bold text-base transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg bg-orange-500 hover:bg-orange-600 text-white shadow-orange-500/20 ${loading ? "opacity-70 cursor-not-allowed" : ""}`}
+              disabled={loading || !captchaToken}
+              className={`w-full py-4 rounded-2xl font-bold text-base transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg ${
+                !captchaToken 
+                ? "bg-slate-200 cursor-not-allowed text-slate-400" 
+                : "bg-orange-500 hover:bg-orange-600 text-white shadow-orange-500/20"
+              }`}
             >
               {loading ? (
                 <>
                   <Loader2 className="animate-spin" size={20} />
-                  Procesando...
+                  Creando cuenta...
                 </>
               ) : (
                 "CREAR CUENTA GRATIS"
@@ -8674,382 +8717,151 @@ export default function RegisterPage() {
     </div>
   );
 }
+
 ----------------------------------------
 
 FILE_PATH: .\JAIKO\frontend\src\pages\SearchPage.jsx
 ----------------------------------------
 import React, { useState, useEffect, useCallback } from 'react';
-import { SlidersHorizontal, X, MapPin } from 'lucide-react';
+import { SlidersHorizontal, X, MapPin, Search as SearchIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import ProfileCard from '../components/ui/ProfileCard';
 import { Spinner, EmptyState } from '../components/ui';
 import { toast } from 'react-hot-toast';
 import { motion } from 'motion/react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-
-// Fix para iconos de Leaflet
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-});
 
 const SCHEDULES = ['morning', 'afternoon', 'night', 'flexible'];
 const SCHEDULE_LABELS = { morning: 'Mañana', afternoon: 'Tarde', night: 'Noche', flexible: 'Flexible' };
-const CITIES = [
-  'Asunción', 'San Lorenzo', 'Luque', 'Fernando de la Mora',
-  'Lambaré', 'Capiatá', 'Encarnación', 'Ciudad del Este',
-];
-const CITY_CENTERS = {
-  'Asunción': [-25.2867, -57.647],
-  'San Lorenzo': [-25.3355, -57.5178],
-  'Luque': [-25.2635, -57.4857],
-  'Fernando de la Mora': [-25.3085, -57.5225],
-  'Lambaré': [-25.3404, -57.6075],
-  'Capiatá': [-25.356, -57.4455],
-  'Encarnación': [-27.3333, -55.8667],
-  'Ciudad del Este': [-25.5097, -54.611],
-};
-const AVATAR_FALLBACK = 'https://ui-avatars.com/api/?background=fde8d0&color=c2550a&size=40&name=';
-
-const EMPTY_FILTERS = {
-  city: 'Asunción', pets: '', smoker: '', schedule: '', min_age: '', max_age: '',
-};
+const CITIES = ['Asunción', 'San Lorenzo', 'Luque', 'Fernando de la Mora', 'Lambaré', 'Capiatá', 'Encarnación', 'Ciudad del Este'];
 
 export default function SearchPage() {
   const navigate = useNavigate();
   const [profiles, setProfiles] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
-  const [showMap, setShowMap] = useState(false);
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [filters, setFilters] = useState({
+    city: 'Asunción', pets: '', smoker: '', schedule: '', min_age: '', max_age: ''
+  });
 
-  // BUG #1 CORREGIDO: fetchProfiles ya NO depende del closure de `filters`.
-  // Antes: useCallback([filters]) creaba una función NUEVA en cada cambio de filtro.
-  // Eso obligaba a poner fetchProfiles en el useEffect deps, generando confusión.
-  // Ahora: recibe `currentFilters` como parámetro → función estable con deps=[].
-  // Beneficio: código más predecible — la función no "cambia" entre renders.
-  const fetchProfiles = useCallback(async (p = 1, currentFilters) => {
+  const fetchProfiles = useCallback(async (currentFilters = filters) => {
     setLoading(true);
     try {
-      // BUG #2 CORREGIDO: antes armábamos un URLSearchParams y lo concatenábamos
-      // como string al URL: api.get(`/profiles/search?${params}`).
-      // Problema: si la ciudad tiene caracteres especiales (tildes, espacios),
-      // el encoding manual puede fallar o duplicarse con el de Axios.
-      // Ahora: pasamos params como objeto a Axios, que hace el encoding correcto.
-      // Beneficio: ciudades como "Fernando de la Mora" se envían sin errores de URL.
-      const params = {
-        page: p,
-        per_page: 20,
-        city: currentFilters.city,
-      };
+      const params = new URLSearchParams({ page: 1, per_page: 20, city: currentFilters.city });
+      if (currentFilters.min_age) params.append('min_age', currentFilters.min_age);
+      if (currentFilters.max_age) params.append('max_age', currentFilters.max_age);
+      if (currentFilters.pets !== '') params.append('pets', currentFilters.pets);
+      if (currentFilters.smoker !== '') params.append('smoker', currentFilters.smoker);
+      if (currentFilters.schedule) params.append('schedule', currentFilters.schedule);
 
-      // Solo agregamos los filtros que tienen valor.
-      // Si están vacíos (""), NO los enviamos — el backend los ignora
-      // y devuelve todos los resultados (comportamiento correcto).
-      if (currentFilters.min_age) params.min_age = currentFilters.min_age;
-      if (currentFilters.max_age) params.max_age = currentFilters.max_age;
-      if (currentFilters.pets !== '') params.pets = currentFilters.pets;
-      if (currentFilters.smoker !== '') params.smoker = currentFilters.smoker;
-      if (currentFilters.schedule) params.schedule = currentFilters.schedule;
-
-      const { data } = await api.get('/profiles/search', { params });
-
-      // Si el perfil no tiene coordenadas propias, usamos el centro de su ciudad
-      // para que igual aparezca en el mapa sin quedar invisible.
-      const profilesWithCoords = (data.profiles || []).map((profile) => ({
-        ...profile,
-        location: {
-          lat: profile.lat ?? CITY_CENTERS[profile.city]?.[0] ?? -25.2867,
-          lng: profile.lng ?? CITY_CENTERS[profile.city]?.[1] ?? -57.647,
-        },
-      }));
-
-      // p === 1 → reemplaza la lista (nueva búsqueda)
-      // p > 1   → agrega al final (paginación "Cargar más")
-      setProfiles(p === 1 ? profilesWithCoords : (prev) => [...prev, ...profilesWithCoords]);
-      setPage(p);
-      setHasMore(data.has_more ?? false);
+      const { data } = await api.get(`/profiles/search?${params}`);
+      setProfiles(data.profiles || []);
     } catch {
       toast.error('Error al buscar perfiles');
     } finally {
       setLoading(false);
     }
-  }, []); // ✅ Sin dependencias: la función es estable durante toda la vida del componente.
+  }, [filters]);
 
-  // BUG #3 CORREGIDO: antes el useEffect dependía de [filters, fetchProfiles].
-  // Como fetchProfiles cambiaba cada vez que filters cambiaba, ambos siempre
-  // cambiaban juntos — tener los dos en deps era redundante y confuso.
-  // Ahora fetchProfiles es estable (deps=[]), así que solo dependemos de [filters].
-  // Debounce de 400ms solo para campos de edad (el usuario escribe carácter a carácter).
-  // Para selects (ciudad, mascotas, etc.) se aplica inmediatamente (0ms).
   useEffect(() => {
-    const delay = (filters.min_age || filters.max_age) ? 400 : 0;
-    const timer = setTimeout(() => {
-      fetchProfiles(1, filters);
-    }, delay);
-    return () => clearTimeout(timer); // Limpia el timer si el usuario sigue escribiendo
+    fetchProfiles();
   }, [filters, fetchProfiles]);
 
-  // Cuenta cuántos filtros están activos para mostrar el badge naranja
   const activeFilterCount = [
-    filters.pets, filters.smoker, filters.schedule, filters.min_age, filters.max_age,
+    filters.pets, filters.smoker, filters.schedule, filters.min_age, filters.max_age
   ].filter(Boolean).length;
-
-  const mapCenter = CITY_CENTERS[filters.city] || [-25.2867, -57.647];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
-
-      {/* HEADER */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
         <div>
-          <h1 className="font-display font-extrabold text-3xl sm:text-4xl text-slate-900">
-            Buscar Roomies
-          </h1>
-          <p className="text-orange-500 font-medium mt-1">
-            {profiles.length > 0
-              ? `${profiles.length} roomies compatibles encontrados`
-              : 'Perfiles compatibles con vos'}
-          </p>
+          <h1 className="font-display font-extrabold text-3xl sm:text-4xl text-blue-950">Buscar Roomies</h1>
+          <p className="text-orange-500 font-bold mt-1">{profiles.length} perfiles compatibles encontrados</p>
         </div>
-
-        <div className="flex items-center gap-3 flex-wrap">
-          <button
-            onClick={() => setShowMap(!showMap)}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-2xl border border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50 transition-all"
-          >
-            <MapPin size={16} /> {showMap ? 'Ver lista' : 'Ver en mapa'}
-          </button>
-
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-2xl border border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50 transition-all relative"
-          >
-            <SlidersHorizontal size={16} />
-            Filtros {showFilters && <X size={14} className="ml-1" />}
-            {activeFilterCount > 0 && (
-              <span className="absolute -top-2 -right-2 bg-orange-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-white shadow-sm">
-                {activeFilterCount}
-              </span>
-            )}
-          </button>
-        </div>
+        
+        <button
+          onClick={() => setShowFilters(!showFilters)}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-2xl border border-orange-100 text-sm font-bold text-blue-900 bg-white hover:bg-orange-50 transition-all relative shadow-sm"
+        >
+          <SlidersHorizontal size={16} />
+          Filtros
+          {activeFilterCount > 0 && (
+            <span className="absolute -top-2 -right-2 bg-orange-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-white shadow-sm">
+              {activeFilterCount}
+            </span>
+          )}
+        </button>
       </div>
 
-      {/* FILTROS */}
-      <div
-        className={`card mb-10 overflow-hidden transition-all duration-500 ${showFilters
-            ? 'max-h-[1000px] opacity-100 p-8'
-            : 'max-h-0 opacity-0 p-0 border-none shadow-none'
-          }`}
-      >
+      <div className={`card mb-10 overflow-hidden transition-all duration-500 ${showFilters ? 'max-h-[1000px] opacity-100 p-8' : 'max-h-0 opacity-0 p-0 border-none shadow-none'}`}>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 items-end">
-
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">
-              Ciudad
-            </label>
-            <select
-              className="input"
-              value={filters.city}
-              onChange={(e) => setFilters((f) => ({ ...f, city: e.target.value }))}
-            >
+            <label className="block text-xs font-bold text-blue-900/40 uppercase tracking-widest ml-1">Ciudad</label>
+            <select className="input" value={filters.city} onChange={(e) => setFilters((f) => ({ ...f, city: e.target.value }))}>
               {CITIES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
-
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">
-              Mascotas
-            </label>
-            <select
-              className="input"
-              value={filters.pets}
-              onChange={(e) => setFilters((f) => ({ ...f, pets: e.target.value }))}
-            >
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Mascotas</label>
+            <select className="input" value={filters.pets} onChange={(e) => setFilters((f) => ({ ...f, pets: e.target.value }))}>
               <option value="">Cualquiera</option>
               <option value="true">Con mascotas</option>
               <option value="false">Sin mascotas</option>
             </select>
           </div>
-
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">
-              Fumador
-            </label>
-            <select
-              className="input"
-              value={filters.smoker}
-              onChange={(e) => setFilters((f) => ({ ...f, smoker: e.target.value }))}
-            >
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Fumador</label>
+            <select className="input" value={filters.smoker} onChange={(e) => setFilters((f) => ({ ...f, smoker: e.target.value }))}>
               <option value="">Cualquiera</option>
               <option value="false">No fuma</option>
               <option value="true">Fumador</option>
             </select>
           </div>
-
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">
-              Horario
-            </label>
-            <select
-              className="input"
-              value={filters.schedule}
-              onChange={(e) => setFilters((f) => ({ ...f, schedule: e.target.value }))}
-            >
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Horario</label>
+            <select className="input" value={filters.schedule} onChange={(e) => setFilters((f) => ({ ...f, schedule: e.target.value }))}>
               <option value="">Cualquiera</option>
-              {SCHEDULES.map((s) => (
-                <option key={s} value={s}>{SCHEDULE_LABELS[s]}</option>
-              ))}
+              {SCHEDULES.map((s) => <option key={s} value={s}>{SCHEDULE_LABELS[s]}</option>)}
             </select>
           </div>
-
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">
-              Edad mín.
-            </label>
-            <input
-              type="number"
-              className="input"
-              placeholder="18"
-              min={18}
-              max={80}
-              value={filters.min_age}
-              onChange={(e) => setFilters((f) => ({ ...f, min_age: e.target.value }))}
-            />
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Edad mín.</label>
+            <input type="number" className="input" placeholder="18" min={18} max={80} value={filters.min_age}
+              onChange={(e) => setFilters((f) => ({ ...f, min_age: e.target.value }))} />
           </div>
-
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">
-              Edad máx.
-            </label>
-            <input
-              type="number"
-              className="input"
-              placeholder="99"
-              min={18}
-              max={99}
-              value={filters.max_age}
-              onChange={(e) => setFilters((f) => ({ ...f, max_age: e.target.value }))}
-            />
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Edad máx.</label>
+            <input type="number" className="input" placeholder="99" min={18} max={99} value={filters.max_age}
+              onChange={(e) => setFilters((f) => ({ ...f, max_age: e.target.value }))} />
           </div>
-
+          
           <div className="sm:col-span-2 lg:col-span-3 flex justify-end gap-3 pt-4 border-t border-slate-50">
-            {/* Limpiar filtros → resetea al estado inicial y el useEffect re-busca */}
-            <button
-              type="button"
-              onClick={() => setFilters(EMPTY_FILTERS)}
-              className="btn-ghost text-sm"
-            >
+            <button type="button"
+              onClick={() => setFilters({ city: 'Asunción', pets: '', smoker: '', schedule: '', min_age: '', max_age: '' })}
+              className="btn-ghost text-sm">
               Limpiar filtros
             </button>
-            {/* Aplicar filtros → útil si el usuario cambió edad y no quiere esperar el debounce */}
-            <button
-              type="button"
-              onClick={() => fetchProfiles(1, filters)}
-              className="btn-primary px-8"
-            >
-              Aplicar filtros
-            </button>
+            <button onClick={() => fetchProfiles()} className="btn-primary">Aplicar filtros</button>
           </div>
         </div>
       </div>
 
-      {/* CONTENIDO */}
-      {loading && profiles.length === 0 ? (
+      {loading ? (
         <div className="flex justify-center py-32"><Spinner size="lg" /></div>
       ) : profiles.length === 0 ? (
-        <EmptyState
-          icon="🔍"
-          title="No encontramos roomies compatibles"
-          description="Probá ajustar tus preferencias en tu perfil o cambiar el filtro de ciudad."
-        />
-      ) : showMap ? (
-        <div className="rounded-3xl overflow-hidden border border-slate-100 shadow-2xl h-[600px] relative z-0">
-          <MapContainer
-            center={mapCenter}
-            zoom={13}
-            style={{ height: '100%', width: '100%' }}
-            scrollWheelZoom={false}
-          >
-            <TileLayer
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              attribution="&copy; OpenStreetMap contributors"
-            />
-            {profiles.map((p) => (
-              <Marker key={p.user_id} position={[p.location.lat, p.location.lng]}>
-                <Popup>
-                  <div
-                    className="cursor-pointer w-60 p-2"
-                    onClick={() => navigate(`/profile/${p.user_id}`)}
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <img
-                        src={p.profile_photo_url || `${AVATAR_FALLBACK}${encodeURIComponent(p.name || 'U')}`}
-                        alt={p.name}
-                        className="w-10 h-10 rounded-full object-cover"
-                        loading="lazy"
-                        onError={(e) => {
-                          e.target.src = `${AVATAR_FALLBACK}${encodeURIComponent(p.name || 'U')}`;
-                        }}
-                      />
-                      <div>
-                        <p className="font-semibold text-sm">{p.name}</p>
-                        <p className="text-xs text-gray-500">{p.city}</p>
-                      </div>
-                    </div>
-                    {p.bio && (
-                      <p className="text-xs text-gray-600 mb-1 line-clamp-2">{p.bio}</p>
-                    )}
-                    <p className="text-xs text-gray-400 mb-1">
-                      {p.smoker ? 'Fumador' : 'No fuma'}
-                      {p.schedule ? ` • ${SCHEDULE_LABELS[p.schedule] || p.schedule}` : ''}
-                    </p>
-                    <div className="text-xs font-bold text-orange-600">
-                      Compatibilidad: {p.compatibility}%
-                    </div>
-                  </div>
-                </Popup>
-              </Marker>
-            ))}
-          </MapContainer>
-        </div>
+        <EmptyState icon="🔍" title="No encontramos roomies compatibles"
+          description="Probá ajustar tus preferencias en tu perfil o cambiar el filtro de ciudad." />
       ) : (
-        <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
-            {profiles.map((p) => (
-              <ProfileCard
-                key={p.user_id}
-                profile={p}
-                compatibility={p.compatibility}
-                matches={p.matches}
-                mismatches={p.mismatches}
-              />
-            ))}
-          </div>
-          {hasMore && (
-            <div className="flex justify-center mt-12">
-              <button
-                onClick={() => fetchProfiles(page + 1, filters)}
-                disabled={loading}
-                className="btn-secondary px-10 flex items-center gap-2"
-              >
-                {loading && <Spinner size="sm" />} Cargar más
-              </button>
-            </div>
-          )}
-        </>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
+          {profiles.map((p) => (
+            <ProfileCard key={p.user_id} profile={p} compatibility={p.compatibility} />
+          ))}
+        </div>
       )}
     </div>
   );
 }
+
 ----------------------------------------
 
 FILE_PATH: .\JAIKO\frontend\src\pages\VerificationPage.jsx
