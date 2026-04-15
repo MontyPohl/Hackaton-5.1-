@@ -6,6 +6,8 @@ import { toast } from "react-hot-toast";
 import { motion } from "motion/react";
 import useAuthStore from "../context/authStore";
 
+import Logo from "../components/ui/Logo";
+
 export default function LoginPage() {
   const navigate = useNavigate();
   const { login, loginWithGoogle } = useAuthStore();
@@ -21,7 +23,7 @@ export default function LoginPage() {
     if (token) {
       localStorage.setItem("jaiko_token", token);
       toast.success("¡Bienvenido a Jaiko!");
-      navigate("/profile");
+      navigate("/search");
     }
   }, [navigate]);
 
@@ -29,7 +31,7 @@ export default function LoginPage() {
     if (role === "admin" || role === "verifier") {
       navigate("/admin");
     } else {
-      navigate("/profile");
+      navigate("/search");
     }
   };
 
@@ -78,15 +80,10 @@ export default function LoginPage() {
       >
         <div className="text-center mb-10">
           <Link to="/" className="inline-flex items-center gap-2 mb-8">
-            <div className="w-10 h-10 bg-orange-500 rounded-xl flex items-center justify-center shadow-lg shadow-orange-500/20">
-              <HomeIcon className="text-white w-6 h-6" />
-            </div>
-            <span className="text-2xl font-display font-extrabold tracking-tighter text-slate-900">
-              JAIK<span className="text-blue-600">O!</span>
-            </span>
+            <Logo className="w-12 h-12" />
           </Link>
-          <h2 className="text-3xl font-display font-extrabold mb-2 text-slate-900">¡Hola de nuevo!</h2>
-          <p className="text-slate-500 text-sm">Ingresá tus datos para continuar.</p>
+          <h2 className="text-3xl font-display font-extrabold mb-2 text-blue-950">¡Hola de nuevo!</h2>
+          <p className="text-blue-900/60 text-sm font-medium">Ingresá tus datos para continuar.</p>
         </div>
 
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-2xl">

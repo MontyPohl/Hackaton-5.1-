@@ -14,11 +14,11 @@ const ProfileCard = ({ profile, compatibility }) => {
           </div>
         )}
       </div>
-      <h3 className="font-display font-extrabold text-lg text-slate-900 mb-1">{profile.name}, {profile.age}</h3>
-      <p className="text-slate-400 text-xs mb-4 flex items-center gap-1">
+      <h3 className="font-display font-extrabold text-lg text-blue-950 mb-1">{profile.name}, {profile.age}</h3>
+      <p className="text-blue-900/40 text-xs mb-4 flex items-center gap-1 font-bold">
         <Briefcase size={12} /> {profile.profession || 'Sin especificar'}
       </p>
-      <div className="flex items-center gap-1 text-slate-500 text-xs mb-6">
+      <div className="flex items-center gap-1 text-blue-900/60 text-xs mb-6 font-bold">
         <MapPin size={12} className="text-orange-500" />
         <span>{profile.city}</span>
       </div>

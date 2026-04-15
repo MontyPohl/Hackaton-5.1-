@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom'; // IMPORTAMOS Outlet
+// ✅ CORRECCIÓN: Importamos Outlet junto con los demás hooks de react-router-dom.
+// Outlet es el "slot" donde React Router v6 inyecta la página hija activa.
+// Sin él, el Layout no sabe dónde poner HomePage, ChatPage, etc.
+import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
 import { 
   Home, 
   Search, 
@@ -9,15 +12,17 @@ import {
   LogOut, 
   Menu, 
   X,
-  ShieldCheck
+  MessageSquare,
+  Sparkles
 } from 'lucide-react';
 import useAuthStore from '../../context/authStore';
 import useNotifStore from '../../context/notifStore';
 import { Avatar } from '../ui';
+import Logo from '../ui/Logo';
 import clsx from 'clsx';
 
 const Navbar = () => {
-  const { isAuthenticated, user, profile, logout } = useAuthStore(); // Agregamos logout
+  const { isAuthenticated, user, profile } = useAuthStore();
   const { unread } = useNotifStore();
   const location = useLocation();
   const navigate = useNavigate();
@@ -33,8 +38,10 @@ const Navbar = () => {
   const navLinks = [
     { to: '/', label: 'Inicio', icon: Home },
     ...(isAuthenticated() ? [
+      { to: '/search', label: 'Buscar Roomie', icon: Sparkles },
       { to: '/listings', label: 'Departamentos', icon: Search },
       { to: '/groups', label: 'Grupos', icon: Users },
+      { to: '/chat', label: 'Chat', icon: MessageSquare },
     ] : []),
   ];
 
@@ -43,16 +50,11 @@ const Navbar = () => {
   return (
     <nav className={clsx(
       'fixed top-0 left-0 w-full z-50 transition-all duration-300 px-6 py-4',
-      isScrolled ? 'bg-white/80 backdrop-blur-lg border-b border-slate-100 py-3' : 'bg-transparent'
+      isScrolled ? 'bg-white/90 backdrop-blur-lg border-b border-orange-100 py-3' : 'bg-transparent'
     )}>
       <div className="max-w-7xl mx-auto flex items-center justify-between">
         <Link to="/" className="flex items-center gap-2 group">
-          <div className="w-10 h-10 bg-orange-500 rounded-xl flex items-center justify-center shadow-lg shadow-orange-500/20 group-hover:scale-110 transition-transform">
-            <ShieldCheck className="text-white w-6 h-6" />
-          </div>
-          <span className="text-2xl font-display font-extrabold tracking-tighter text-slate-900">
-            JAIK<span className="text-blue-600">O!</span>
-          </span>
+          <Logo className="w-10 h-10" />
         </Link>
 
         {/* Desktop Nav */}
@@ -63,7 +65,7 @@ const Navbar = () => {
               to={link.to} 
               className={clsx(
                 'text-sm font-bold transition-colors hover:text-orange-500',
-                isActive(link.to) ? 'text-orange-500' : 'text-slate-600'
+                isActive(link.to) ? 'text-blue-600' : 'text-blue-900'
               )}
             >
               {link.label}
@@ -138,10 +140,7 @@ const Navbar = () => {
               <Link to="/notifications" onClick={() => setIsOpen(false)} className="flex items-center gap-4 text-2xl font-display font-extrabold text-slate-900">
                 <Bell className="w-6 h-6" /> Notificaciones
               </Link>
-              <button 
-                onClick={() => { logout(); setIsOpen(false); }}
-                className="flex items-center gap-4 text-2xl font-display font-extrabold text-red-500 mt-4"
-              >
+              <button className="flex items-center gap-4 text-2xl font-display font-extrabold text-red-500 mt-4">
                 <LogOut className="w-6 h-6" /> Salir
               </button>
             </>
@@ -157,48 +156,86 @@ const Navbar = () => {
   );
 };
 
+const BottomNav = () => {
+  const { isAuthenticated } = useAuthStore();
+  const location = useLocation();
+  
+  if (!isAuthenticated()) return null;
+
+  const mobileLinks = [
+    { to: '/', label: 'Inicio', icon: Home },
+    { to: '/search', label: 'Roomies', icon: Sparkles },
+    { to: '/chat', label: 'Chat', icon: MessageSquare },
+    { to: '/notifications', label: 'Notif', icon: Bell },
+    { to: '/profile', label: 'Perfil', icon: User },
+  ];
+
+  const isActive = (path) => location.pathname === path;
+
+  return (
+    <div className="md:hidden fixed bottom-0 left-0 w-full bg-white/95 backdrop-blur-lg border-t border-orange-100 z-50 px-2 pb-safe">
+      <div className="flex items-center justify-around py-3">
+        {mobileLinks.map((link) => (
+          <Link 
+            key={link.to} 
+            to={link.to} 
+            className={clsx(
+              'flex flex-col items-center gap-1 transition-all duration-300',
+              isActive(link.to) ? 'text-orange-500 scale-110' : 'text-blue-900 opacity-60'
+            )}
+          >
+            <link.icon size={20} strokeWidth={isActive(link.to) ? 2.5 : 2} />
+            <span className="text-[10px] font-bold uppercase tracking-tighter">{link.label}</span>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// ✅ CORRECCIÓN: Eliminamos el prop { children } porque Layout ya NO lo necesita.
+// React Router v6 inyecta la página activa a través de <Outlet />, no por props.
+// Antes: Layout recibía children = undefined → main quedaba vacío → pantalla blanca.
 const Layout = () => {
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
-      <main className="flex-1 pt-20">
-        {/* CORRECCIÓN CLAVE: Outlet renderiza la página actual (Home, Listings, etc.) */}
-        <Outlet /> 
+      <main className="flex-1 pt-20 pb-20 md:pb-0">
+        {/* ✅ CORRECCIÓN CLAVE: <Outlet /> reemplaza a {children}.
+            Outlet es el punto de montaje donde React Router renderiza
+            la ruta hija activa (HomePage, ChatPage, etc.). */}
+        <Outlet />
       </main>
-      <footer className="bg-slate-900 text-white py-20 px-6">
+      <BottomNav />
+      <footer className="hidden md:block bg-blue-950 text-white py-20 px-6">
         <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-12">
           <div className="md:col-span-2">
             <Link to="/" className="flex items-center gap-2 mb-6">
-              <div className="w-10 h-10 bg-orange-500 rounded-xl flex items-center justify-center shadow-lg shadow-orange-500/20">
-                <ShieldCheck className="text-white w-6 h-6" />
-              </div>
-              <span className="text-2xl font-display font-extrabold tracking-tighter text-white">
-                JAIK<span className="text-blue-500">O!</span>
-              </span>
+              <Logo className="w-10 h-10" />
             </Link>
-            <p className="text-slate-400 max-w-sm leading-relaxed">
+            <p className="text-blue-200/60 max-w-sm leading-relaxed">
               La plataforma líder en Paraguay para encontrar el compañero de hogar ideal. Seguridad, rapidez y compatibilidad en un solo lugar.
             </p>
           </div>
           <div>
             <h4 className="font-bold mb-6 text-lg">Plataforma</h4>
-            <ul className="space-y-4 text-slate-400 text-sm">
+            <ul className="space-y-4 text-blue-200/60 text-sm">
+              <li><Link to="/search" className="hover:text-white transition-colors">Buscar Roomies</Link></li>
               <li><Link to="/listings" className="hover:text-white transition-colors">Departamentos</Link></li>
               <li><Link to="/groups" className="hover:text-white transition-colors">Grupos</Link></li>
-              <li><Link to="/search" className="hover:text-white transition-colors">Buscar Roomies</Link></li>
               <li><Link to="/verification" className="hover:text-white transition-colors">Verificación</Link></li>
             </ul>
           </div>
           <div>
             <h4 className="font-bold mb-6 text-lg">Legal</h4>
-            <ul className="space-y-4 text-slate-400 text-sm">
+            <ul className="space-y-4 text-blue-200/60 text-sm">
               <li><a href="#" className="hover:text-white transition-colors">Términos y Condiciones</a></li>
               <li><a href="#" className="hover:text-white transition-colors">Privacidad</a></li>
               <li><a href="#" className="hover:text-white transition-colors">Cookies</a></li>
             </ul>
           </div>
         </div>
-        <div className="max-w-7xl mx-auto border-t border-white/10 mt-20 pt-8 text-center text-slate-500 text-xs font-bold uppercase tracking-widest">
+        <div className="max-w-7xl mx-auto border-t border-white/10 mt-20 pt-8 text-center text-blue-200/30 text-xs font-bold uppercase tracking-widest">
           © {new Date().getFullYear()} JAIKO! — Todos los derechos reservados.
         </div>
       </footer>

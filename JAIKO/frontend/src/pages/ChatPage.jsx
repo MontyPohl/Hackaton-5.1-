@@ -2,12 +2,11 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Send, ArrowLeft, MessageSquare, MoreVertical, Phone, Video } from 'lucide-react';
 import api from '../services/api';
-import { connectSocket, getSocket, onSocketConnect } from '../services/socket';
+import { getSocket, onSocketConnect } from '../services/socket';
 import useAuthStore from '../context/authStore';
 import { Avatar, Spinner, EmptyState } from '../components/ui';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { toast } from 'react-hot-toast';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -34,9 +33,6 @@ export default function ChatPage() {
   const MAX_MESSAGES = 100;
 
   useEffect(() => {
-    // FIX: Inicializar el socket explícitamente para evitar fallos de referencia null
-    connectSocket();
-
     const handleMsg = (msg) => {
       if (msg.chat_id === activeChatIdRef.current) {
         setMessages((m) => {
@@ -87,12 +83,11 @@ export default function ChatPage() {
         if (found) selectChat(found);
       }
     });
-  }, [chatId]);
+  }, []);
 
   const selectChat = useCallback(
     async (chat) => {
       const s = socketRef.current;
-      // Salir del chat anterior antes de entrar al nuevo
       if (activeChatIdRef.current && activeChatIdRef.current !== chat.id && s?.connected) {
         s.emit('leave_chat', { chat_id: activeChatIdRef.current });
       }
@@ -129,13 +124,7 @@ export default function ChatPage() {
 
   const sendMessage = () => {
     const s = socketRef.current;
-    if (!text.trim() || !activeChatIdRef.current) return;
-
-    if (!s?.connected) {
-      toast.error('Sin conexión al chat. Intentá de nuevo en un momento.');
-      return;
-    }
-
+    if (!text.trim() || !activeChatIdRef.current || !s?.connected) return;
     s.emit('send_message', { chat_id: activeChatIdRef.current, content: text.trim() });
     setText('');
     clearTimeout(typingTimer.current);
@@ -158,7 +147,6 @@ export default function ChatPage() {
     ta.style.height = Math.min(ta.scrollHeight, 112) + 'px';
 
     if (s?.connected && activeChatIdRef.current) {
-      // Throttle: emitir typing máximo cada 500ms
       const now = Date.now();
       if (now - lastTypingEmit.current > 500) {
         s.emit('typing', { chat_id: activeChatIdRef.current });
@@ -198,15 +186,18 @@ export default function ChatPage() {
       <div className="flex h-full bg-white rounded-[2.5rem] border border-slate-100 shadow-2xl overflow-hidden">
         
         {/* ── Sidebar ─────────────────────────────────────────────────────── */}
-        <div className={clsx(
+        <div
+          className={clsx(
             'flex-shrink-0 border-r border-slate-50 flex flex-col transition-all duration-300',
             'w-full md:w-80 lg:w-96',
             active ? 'hidden md:flex' : 'flex'
-          )}>
+          )}
+        >
           <div className="p-8 border-b border-slate-50">
-            <h1 className="font-display font-extrabold text-3xl text-slate-900 mb-2">Mensajes</h1>
-            <p className="text-slate-400 text-sm font-medium">{chats.length} conversaciones activas</p>
+            <h1 className="font-display font-extrabold text-3xl text-blue-950 mb-2">Mensajes</h1>
+            <p className="text-blue-900/40 text-sm font-bold">{chats.length} conversaciones activas</p>
           </div>
+          
           <div className="flex-1 overflow-y-auto p-4 space-y-2">
             {chats.length === 0 ? (
               <div className="py-20 text-center">
@@ -215,27 +206,32 @@ export default function ChatPage() {
               </div>
             ) : (
               chats.map((chat) => (
-                <button key={chat.id} onClick={() => selectChat(chat)}
+                <button
+                  key={chat.id}
+                  onClick={() => selectChat(chat)}
                   className={clsx(
                     'w-full flex items-center gap-4 p-4 rounded-3xl transition-all text-left group',
-                    active?.id === chat.id ? 'bg-blue-50 border-blue-100' : 'hover:bg-slate-50 border-transparent'
-                  )}>
+                    active?.id === chat.id 
+                      ? 'bg-blue-50 border-blue-100' 
+                      : 'hover:bg-slate-50 border-transparent'
+                  )}
+                >
                   <Avatar src={getChatPhoto(chat)} name={getChatName(chat)} size="md" className="border-2 border-white shadow-sm" />
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-center mb-1">
-                      <p className={clsx('font-bold truncate', active?.id === chat.id ? 'text-blue-700' : 'text-slate-900')}>
+                      <p className={clsx('font-bold truncate', active?.id === chat.id ? 'text-blue-700' : 'text-blue-950')}>
                         {getChatName(chat)}
                       </p>
                       {chat.last_message && (
-                        <span className="text-[10px] text-slate-400 font-bold uppercase">
+                        <span className="text-[10px] text-blue-900/40 font-bold uppercase">
                           {formatDistanceToNow(new Date(chat.last_message.created_at), { locale: es })}
                         </span>
                       )}
                     </div>
                     {chat.last_message ? (
-                      <p className="text-xs text-slate-400 truncate font-medium">{chat.last_message.content}</p>
+                      <p className="text-xs text-blue-900/40 truncate font-bold">{chat.last_message.content}</p>
                     ) : (
-                      <p className="text-xs text-slate-300 italic">Inicia una conversación</p>
+                      <p className="text-xs text-blue-900/20 italic">Inicia una conversación</p>
                     )}
                   </div>
                 </button>
@@ -244,7 +240,7 @@ export default function ChatPage() {
           </div>
         </div>
 
-        {/* ── Chat Panel ──────────────────────────────────────────────────── */}
+        {/* ── Chat panel ──────────────────────────────────────────────────── */}
         <div className={clsx(
           'flex-col flex-1 bg-slate-50/30',
           active ? 'flex' : 'hidden md:flex'
@@ -254,45 +250,74 @@ export default function ChatPage() {
               {/* Header */}
               <div className="flex items-center justify-between p-6 bg-white border-b border-slate-50">
                 <div className="flex items-center gap-4">
-                  <button className="md:hidden p-2 rounded-xl hover:bg-slate-100 text-slate-400 transition-all" onClick={handleBack}>
+                  <button
+                    className="md:hidden p-2 rounded-xl hover:bg-slate-100 text-slate-400 transition-all"
+                    onClick={handleBack}
+                  >
                     <ArrowLeft size={20} />
                   </button>
                   <Avatar src={getChatPhoto(active)} name={getChatName(active)} size="md" className="border-2 border-slate-100" />
                   <div>
-                    <p className="font-display font-extrabold text-slate-900">{getChatName(active)}</p>
-                    {typing ? (
-                      <p className="text-[10px] font-bold text-blue-500 uppercase tracking-widest animate-pulse">Escribiendo...</p>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">En línea</p>
-                      </div>
-                    )}
+                    <p className="font-display font-extrabold text-blue-950">{getChatName(active)}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      <p className="text-[10px] font-bold text-blue-900/40 uppercase tracking-widest">En línea</p>
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button className="p-2.5 rounded-xl text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all"><Phone size={20} /></button>
-                  <button className="p-2.5 rounded-xl text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all"><Video size={20} /></button>
-                  <button className="p-2.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all"><MoreVertical size={20} /></button>
+                  <button className="p-2.5 rounded-xl text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all">
+                    <Phone size={20} />
+                  </button>
+                  <button className="p-2.5 rounded-xl text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all">
+                    <Video size={20} />
+                  </button>
+                  <button className="p-2.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all">
+                    <MoreVertical size={20} />
+                  </button>
                 </div>
               </div>
 
               {/* Messages */}
               <div className="flex-1 overflow-y-auto p-8 space-y-6">
-                {loading && <div className="flex justify-center py-10"><Spinner size="lg" /></div>}
+                {loading && (
+                  <div className="flex justify-center py-10">
+                    <Spinner size="lg" />
+                  </div>
+                )}
                 <AnimatePresence initial={false}>
                   {messages.map((msg, i) => {
                     const isMe = msg.sender_id === user?.id;
                     const showAvatar = !isMe && (i === 0 || messages[i-1].sender_id !== msg.sender_id);
+                    
                     return (
-                      <motion.div key={msg.id} initial={{ opacity: 0, y: 10, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }}
-                        className={clsx('flex items-end gap-3', isMe ? 'flex-row-reverse' : 'flex-row')}>
+                      <motion.div
+                        key={msg.id}
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        className={clsx(
+                          'flex items-end gap-3',
+                          isMe ? 'flex-row-reverse' : 'flex-row'
+                        )}
+                      >
                         <div className="w-8 flex-shrink-0">
-                          {showAvatar && <Avatar src={msg.sender_photo} name={msg.sender_name} size="sm" className="w-8 h-8" />}
+                          {showAvatar && (
+                            <Avatar src={msg.sender_photo} name={msg.sender_name} size="sm" className="w-8 h-8" />
+                          )}
                         </div>
-                        <div className={clsx('max-w-[70%] px-5 py-3.5 rounded-[1.5rem] text-sm shadow-sm relative group', isMe ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white text-slate-700 border border-slate-100 rounded-bl-none')}>
+                        <div
+                          className={clsx(
+                            'max-w-[70%] px-5 py-3.5 rounded-[1.5rem] text-sm shadow-sm relative group',
+                            isMe
+                              ? 'bg-blue-600 text-white rounded-br-none'
+                              : 'bg-white text-slate-700 border border-slate-100 rounded-bl-none'
+                          )}
+                        >
                           <p className="leading-relaxed break-words font-medium">{msg.content}</p>
-                          <p className={clsx('text-[9px] font-bold uppercase tracking-widest mt-2 opacity-0 group-hover:opacity-60 transition-opacity', isMe ? 'text-white' : 'text-slate-400')}>
+                          <p className={clsx(
+                            'text-[9px] font-bold uppercase tracking-widest mt-2 opacity-0 group-hover:opacity-60 transition-opacity',
+                            isMe ? 'text-white' : 'text-slate-400'
+                          )}>
                             {formatDistanceToNow(new Date(msg.created_at), { locale: es })}
                           </p>
                         </div>
@@ -300,19 +325,38 @@ export default function ChatPage() {
                     );
                   })}
                 </AnimatePresence>
+                {typing && (
+                  <div className="flex items-center gap-2 text-blue-600 font-bold text-[10px] uppercase tracking-widest animate-pulse ml-11">
+                    <span className="flex gap-1">
+                      <span className="w-1 h-1 bg-blue-600 rounded-full animate-bounce" />
+                      <span className="w-1 h-1 bg-blue-600 rounded-full animate-bounce [animation-delay:0.2s]" />
+                      <span className="w-1 h-1 bg-blue-600 rounded-full animate-bounce [animation-delay:0.4s]" />
+                    </span>
+                    Escribiendo...
+                  </div>
+                )}
                 <div ref={bottomRef} />
               </div>
 
               {/* Input */}
               <div className="p-6 bg-white border-t border-slate-50 flex items-end gap-4">
                 <div className="flex-1 relative">
-                  <textarea ref={textareaRef} value={text} onChange={handleTypingInput} onKeyDown={handleKeyDown} rows={1} placeholder="Escribí un mensaje..."
+                  <textarea
+                    ref={textareaRef}
+                    value={text}
+                    onChange={handleTypingInput}
+                    onKeyDown={handleKeyDown}
+                    rows={1}
+                    placeholder="Escribí un mensaje..."
                     className="w-full bg-slate-50 border border-slate-100 rounded-[1.5rem] px-6 py-4 text-sm focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all resize-none leading-relaxed"
                     style={{ maxHeight: '112px' }}
                   />
                 </div>
-                <button onClick={sendMessage} disabled={!text.trim()}
-                  className="w-14 h-14 bg-orange-500 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-orange-500/20 hover:bg-orange-600 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:pointer-events-none">
+                <button
+                  onClick={sendMessage}
+                  disabled={!text.trim()}
+                  className="w-14 h-14 bg-orange-500 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-orange-500/20 hover:bg-orange-600 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:pointer-events-none"
+                >
                   <Send size={22} className="ml-1" />
                 </button>
               </div>
