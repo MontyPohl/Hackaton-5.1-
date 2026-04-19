@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+// ── CAMBIO 1: Importamos useLocation para leer el estado del router ───────────
+// useLocation().state es donde ProfilePage guarda { flyTo, switchToMap }
+import { useLocation } from 'react-router-dom';
 import { Map, LayoutGrid, Plus, SlidersHorizontal, X } from 'lucide-react';
-import api, { getRoomies } from '../services/api';
+import api from '../services/api';
 import ListingCard from '../components/ui/ListingCard';
 import { Spinner, EmptyState } from '../components/ui';
 import useAuthStore from '../context/authStore';
@@ -11,51 +14,89 @@ const CITIES = [
   'Lambaré', 'Capiatá', 'Encarnación', 'Ciudad del Este',
 ];
 
+// Coordenadas centrales de cada ciudad — para centrar el mapa
 const CITY_CENTERS = {
-  'Asunción':           [-25.2867, -57.647 ],
-  'San Lorenzo':        [-25.3355, -57.5178],
-  'Luque':              [-25.2635, -57.4857],
-  'Fernando de la Mora':[-25.3085, -57.5225],
-  'Lambaré':            [-25.3404, -57.6075],
-  'Capiatá':            [-25.356,  -57.4455],
-  'Encarnación':        [-27.3333, -55.8667],
-  'Ciudad del Este':    [-25.5097, -54.611 ],
+  'Asunción': [-25.2867, -57.647],
+  'San Lorenzo': [-25.3355, -57.5178],
+  'Luque': [-25.2635, -57.4857],
+  'Fernando de la Mora': [-25.3085, -57.5225],
+  'Lambaré': [-25.3404, -57.6075],
+  'Capiatá': [-25.356, -57.4455],
+  'Encarnación': [-27.3333, -55.8667],
+  'Ciudad del Este': [-25.5097, -54.611],
 };
 
 export default function ListingsPage() {
   const { isAuthenticated } = useAuthStore();
-  const [listings,   setListings]   = useState([]);
-  const [loading,    setLoading]    = useState(true);
-  const [view,       setView]       = useState('grid');
-  const [showFilters,setShowFilters]= useState(false);
+  const [listings, setListings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState('grid');
+  const [showFilters, setShowFilters] = useState(false);
 
-  /**
-   * ✅ NUEVO: estado para el componente del mapa.
-   *
-   * JaikoMap usa react-leaflet (que no soporta SSR y es pesado).
-   * Lo cargamos de forma dinámica con import() solamente cuando el
-   * usuario activa la vista de mapa — no antes.
-   * Esto evita que leaflet se incluya en el bundle inicial de la página.
-   */
-  const [MapComp, setMapComp] = useState(null);
+  // ── CAMBIO 2: Leer el estado que nos pasó ProfilePage ────────────────────
+  // useLocation() devuelve el objeto de la ruta actual.
+  // .state es el objeto que pasamos en navigate('/listings', { state: {...} })
+  //
+  // Ejemplo de lo que puede llegar:
+  //   { flyTo: [-25.28, -57.64], switchToMap: true }
+  const routerState = useLocation().state;
+
+  // ── CAMBIO 3: Estado para las coordenadas de foco en el mapa ─────────────
+  // Si llegamos desde ProfilePage con flyTo, lo usamos como valor inicial.
+  // null = el mapa muestra el centro de la ciudad sin foco especial.
+  const [mapFlyTo, setMapFlyTo] = useState(
+    routerState?.flyTo || null
+  )
+
+  // ── CAMBIO 4: Estado para el componente JaikoMap (carga lazy) ─────────────
+  // Igual que en ListingDetailPage: cargamos JaikoMap solo cuando se necesita
+  // para no agregar su peso al bundle inicial de la página.
+  const [MapComp, setMapComp] = useState(null)
 
   const [filters, setFilters] = useState({
-    city:            'Asunción',
-    min_price:       '',
-    max_price:       '',
-    pets_allowed:    '',
-    smoking_allowed: '',
-    type:            '',
+    city:             'Asunción',
+    min_price:        '',
+    max_price:        '',
+    pets_allowed:     '',
+    smoking_allowed:  '',
+    type:             '',
+    // Nuevos filtros: género preferido del roomie y edad mínima
+    preferred_gender: '',   // 'male' | 'female' | 'non_binary' | '' (cualquiera)
+    min_age:          '',   // número >= 18, '' = sin límite
   });
 
-  // ── Cargar listados ────────────────────────────────────────────────────────
+  // ── CAMBIO 5: Efecto que responde a la navegación desde ProfilePage ────────
+  // Si llegamos con { switchToMap: true } en el estado del router,
+  // automáticamente activamos la vista de mapa.
+  // Solo corre una vez al montar el componente (dependencias vacías []).
+  useEffect(() => {
+    if (routerState?.switchToMap) {
+      setView('map')
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── CAMBIO 6: Cargar JaikoMap de forma lazy cuando se activa la vista mapa ─
+  // No queremos cargar Leaflet si el usuario está en vista grid.
+  // useEffect con [view] se ejecuta cada vez que view cambia.
+  useEffect(() => {
+    if (view === 'map' && !MapComp) {
+      // import() dinámico: carga el módulo solo cuando se necesita
+      import('../components/map/JaikoMap').then(m => {
+        setMapComp(() => m.default)
+      })
+    }
+  }, [view])
+
+  // Carga los listings cuando cambian los filtros
   useEffect(() => {
     const params = new URLSearchParams({ page: 1, per_page: 24, city: filters.city });
-    if (filters.min_price)       params.set('min_price',       filters.min_price);
-    if (filters.max_price)       params.set('max_price',       filters.max_price);
-    if (filters.pets_allowed)    params.set('pets_allowed',    filters.pets_allowed);
-    if (filters.smoking_allowed) params.set('smoking_allowed', filters.smoking_allowed);
-    if (filters.type)            params.set('type',            filters.type);
+    if (filters.min_price)       params.set('min_price',        filters.min_price);
+    if (filters.max_price)       params.set('max_price',        filters.max_price);
+    if (filters.pets_allowed)    params.set('pets_allowed',     filters.pets_allowed);
+    if (filters.smoking_allowed) params.set('smoking_allowed',  filters.smoking_allowed);
+    if (filters.type)            params.set('type',             filters.type);
+    if (filters.preferred_gender) params.set('preferred_gender', filters.preferred_gender);
+    if (filters.min_age)         params.set('min_age',          filters.min_age);
 
     setLoading(true);
     api.get(`/listings/?${params}`)
@@ -64,31 +105,17 @@ export default function ListingsPage() {
       .finally(() => setLoading(false));
   }, [filters]);
 
-  /**
-   * ✅ NUEVO: cargar JaikoMap de forma dinámica al activar la vista mapa.
-   *
-   * Por qué no lo cargamos al montar el componente:
-   *   react-leaflet incluye todo Leaflet (~40kb gzipped) más el CSS del mapa.
-   *   Si el usuario nunca toca "Mapa", pagaría ese costo sin necesidad.
-   *   Con import() diferido, el chunk solo se descarga si se activa la vista.
-   *
-   * Por qué setMapComp(() => m.default) y no setMapComp(m.default):
-   *   Si pasás una función directamente a setState, React la llama como
-   *   "updater function". Al envolverla en () => m.default le indicamos
-   *   que el nuevo estado ES esa función, no el resultado de llamarla.
-   */
-  const handleViewChange = (newView) => {
-    setView(newView);
-    if (newView === 'map' && !MapComp) {
-      import('../components/map/JaikoMap')
-        .then(m => setMapComp(() => m.default))
-        .catch(() => {}); // silencioso: si falla, la vista queda vacía
-    }
-  };
+  const activeFilterCount = [
+    filters.min_price, filters.max_price, filters.pets_allowed,
+    filters.smoking_allowed, filters.type, filters.preferred_gender, filters.min_age,
+  ].filter(Boolean).length;
 
-  // Convertir listings a formato listingMarkers que acepta JaikoMap
+  // ── CAMBIO 7: Preparar los marcadores para JaikoMap ──────────────────────
+  // JaikoMap espera: [{ lat, lng, id, title, price, neighborhood }]
+  // Los listings tienen latitude/longitude (nombres distintos), hay que mapear.
+  // .filter() descarta listings sin coordenadas (no pueden mostrarse en el mapa).
   const listingMarkers = listings
-    .filter(l => l.latitude != null && l.longitude != null)
+    .filter(l => l.latitude && l.longitude)
     .map(l => ({
       lat:          l.latitude,
       lng:          l.longitude,
@@ -96,44 +123,35 @@ export default function ListingsPage() {
       title:        l.title,
       price:        l.total_price,
       neighborhood: l.neighborhood,
-    }));
-
-  const activeFilterCount = [
-    filters.min_price, filters.max_price, filters.pets_allowed,
-    filters.smoking_allowed, filters.type,
-  ].filter(Boolean).length;
+    }))
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
-
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
         <div>
-          <h1 className="font-display font-extrabold text-3xl sm:text-4xl text-slate-900">
-            Departamentos
-          </h1>
-          <p className="text-orange-500 font-medium mt-1">
-            {listings.length} publicaciones disponibles
-          </p>
+          <h1 className="font-display font-extrabold text-3xl sm:text-4xl text-slate-900">Departamentos</h1>
+          <p className="text-orange-500 font-medium mt-1">{listings.length} publicaciones disponibles</p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          {/* Toggle Grid / Mapa */}
+          {/* Botones Grid / Mapa */}
           <div className="flex bg-slate-100 p-1 rounded-2xl">
             <button
-              onClick={() => handleViewChange('grid')}
+              onClick={() => setView('grid')}
               className={`px-4 py-2 flex items-center gap-2 text-sm font-bold rounded-xl transition-all
-                ${view === 'grid'
-                  ? 'bg-white text-blue-600 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-600'}`}
+                ${view === 'grid' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
             >
               <LayoutGrid size={16} /> Grid
             </button>
             <button
-              onClick={() => handleViewChange('map')}
+              onClick={() => {
+                setView('map')
+                // Al cambiar a mapa manualmente (no desde perfil), limpiamos el flyTo
+                // para que no quede un foco residual de una navegación anterior
+                if (!routerState?.flyTo) setMapFlyTo(null)
+              }}
               className={`px-4 py-2 flex items-center gap-2 text-sm font-bold rounded-xl transition-all
-                ${view === 'map'
-                  ? 'bg-white text-blue-600 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-600'}`}
+                ${view === 'map' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
             >
               <Map size={16} /> Mapa
             </button>
@@ -161,16 +179,10 @@ export default function ListingsPage() {
       </div>
 
       {/* ── Filters ───────────────────────────────────────────────────────── */}
-      <div className={`card mb-10 overflow-hidden transition-all duration-500 ${
-        showFilters
-          ? 'max-h-[1000px] opacity-100 p-8'
-          : 'max-h-0 opacity-0 p-0 border-none shadow-none'
-      }`}>
+      <div className={`card mb-10 overflow-hidden transition-all duration-500 ${showFilters ? 'max-h-[1000px] opacity-100 p-8' : 'max-h-0 opacity-0 p-0 border-none shadow-none'}`}>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 items-end">
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">
-              Ciudad
-            </label>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Ciudad</label>
             <select
               className="input"
               value={filters.city}
@@ -181,9 +193,7 @@ export default function ListingsPage() {
           </div>
 
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">
-              Tipo
-            </label>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Tipo</label>
             <select
               className="input"
               value={filters.type}
@@ -197,35 +207,57 @@ export default function ListingsPage() {
           </div>
 
           <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">
-              Precio mín
-            </label>
-            <input
-              type="number" className="input" value={filters.min_price} placeholder="0"
-              onChange={e => setFilters(f => ({ ...f, min_price: e.target.value }))}
-            />
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Precio mín</label>
+            <input type="number" className="input" value={filters.min_price} placeholder="0"
+              onChange={e => setFilters(f => ({ ...f, min_price: e.target.value }))} />
           </div>
 
           <div className="space-y-2">
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Precio máx</label>
+            <input type="number" className="input" value={filters.max_price} placeholder="Sin límite"
+              onChange={e => setFilters(f => ({ ...f, max_price: e.target.value }))} />
+          </div>
+
+          {/* Género preferido del roomie */}
+          <div className="space-y-2">
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">
-              Precio máx
+              Género del roomie
+            </label>
+            <select
+              className="input"
+              value={filters.preferred_gender}
+              onChange={e => setFilters(f => ({ ...f, preferred_gender: e.target.value }))}
+            >
+              <option value="">Cualquiera</option>
+              <option value="male">Hombre</option>
+              <option value="female">Mujer</option>
+              <option value="non_binary">No binario</option>
+            </select>
+          </div>
+
+          {/* Edad mínima del roomie */}
+          <div className="space-y-2">
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">
+              Edad mínima del roomie
             </label>
             <input
-              type="number" className="input" value={filters.max_price} placeholder="Sin límite"
-              onChange={e => setFilters(f => ({ ...f, max_price: e.target.value }))}
+              type="number"
+              className="input"
+              min={18} max={80}
+              value={filters.min_age}
+              placeholder="Sin límite"
+              onChange={e => setFilters(f => ({ ...f, min_age: e.target.value }))}
             />
           </div>
 
           <div className="sm:col-span-2 lg:col-span-4 flex flex-wrap gap-3 pt-4 border-t border-slate-50">
             {[
-              ['pets_allowed',    '🐾 Mascotas' ],
-              ['smoking_allowed', '🚬 Fumadores'],
+              ['pets_allowed', '🐾 Mascotas'],
+              ['smoking_allowed', '🚬 Fumadores']
             ].map(([key, label]) => (
               <button
                 key={key}
-                onClick={() => setFilters(f => ({
-                  ...f, [key]: f[key] === 'true' ? '' : 'true',
-                }))}
+                onClick={() => setFilters(f => ({ ...f, [key]: f[key] === 'true' ? '' : 'true' }))}
                 className={`px-4 py-2 rounded-xl border-2 text-sm font-bold transition-all
                   ${filters[key] === 'true'
                     ? 'border-blue-500 bg-blue-50 text-blue-600'
@@ -238,6 +270,7 @@ export default function ListingsPage() {
               onClick={() => setFilters({
                 city: 'Asunción', min_price: '', max_price: '',
                 pets_allowed: '', smoking_allowed: '', type: '',
+                preferred_gender: '', min_age: '',
               })}
               className="ml-auto text-sm font-bold text-red-400 hover:text-red-500 flex items-center gap-1"
             >
@@ -247,72 +280,58 @@ export default function ListingsPage() {
         </div>
       </div>
 
-      {/* ── Contenido: Grid o Mapa ────────────────────────────────────────── */}
+      {/* ── CAMBIO 8: Contenido con vista Mapa implementada ──────────────── */}
       {loading ? (
         <div className="flex justify-center py-32"><Spinner size="lg" /></div>
 
-      ) : listings.length === 0 ? (
-        <EmptyState
-          icon="🏠"
-          title="No hay publicaciones"
-          description="Sé el primero en publicar en esta ciudad."
-        />
+      ) : listings.length === 0 && view === 'grid' ? (
+        <EmptyState icon="🏠" title="No hay publicaciones" description="Sé el primero en publicar en esta ciudad." />
 
-      ) : view === 'grid' ? (
-        /* ── Vista grilla ─────────────────────────────────────────────────── */
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
-          {listings.map(l => <ListingCard key={l.id} listing={l} />)}
+      ) : view === 'map' ? (
+        // ── VISTA MAPA ──────────────────────────────────────────────────────
+        <div>
+          {/* Contador de marcadores sobre el mapa */}
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-bold text-slate-500">
+              {listingMarkers.length === 0
+                ? 'No hay departamentos con ubicación en esta ciudad'
+                : `${listingMarkers.length} departamento${listingMarkers.length !== 1 ? 's' : ''} en el mapa`
+              }
+            </p>
+            {/* Si llegamos desde el perfil con flyTo, mostramos de dónde vino el foco */}
+            {mapFlyTo && (
+              <button
+                onClick={() => setMapFlyTo(null)}
+                className="text-xs font-bold text-orange-500 hover:text-orange-600 flex items-center gap-1"
+              >
+                <X size={12} /> Quitar foco de tu ubicación
+              </button>
+            )}
+          </div>
+
+          {MapComp ? (
+            // JaikoMap ya está cargado → renderizamos el mapa
+            <MapComp
+              center={CITY_CENTERS[filters.city] || [-25.2867, -57.647]}
+              listingMarkers={listingMarkers}
+              height="600px"
+              flyTo={mapFlyTo}
+            />
+          ) : (
+            // JaikoMap todavía se está cargando (import() dinámico)
+            <div className="flex justify-center items-center py-32 bg-slate-50 rounded-2xl border border-slate-100">
+              <div className="flex flex-col items-center gap-3 text-slate-400">
+                <Spinner size="lg" />
+                <p className="text-sm font-medium">Cargando mapa...</p>
+              </div>
+            </div>
+          )}
         </div>
 
       ) : (
-        /* ── Vista mapa ───────────────────────────────────────────────────────
-         *
-         * ✅ FIX: Esta sección no existía antes.
-         *
-         * El botón "Mapa" cambiaba view a 'map' pero el JSX no tenía
-         * ninguna rama para ese estado — el contenido desaparecía por completo.
-         *
-         * Ahora:
-         *  1. Si MapComp aún no cargó (import() en curso) → muestra spinner.
-         *  2. Si no hay departamentos con coords → muestra mensaje informativo.
-         *  3. Si todo está listo → renderiza JaikoMap con listingMarkers.
-         *
-         * Por qué un contenedor con altura fija (h-[500px]):
-         *   JaikoMap necesita que el padre tenga altura definida.
-         *   Con height: '100%' sin un padre con altura, el mapa queda en 0px.
-         *   500px en mobile, 600px en sm+ da una experiencia cómoda.
-         */
-        <div>
-          {/* Contador de pins disponibles */}
-          {listingMarkers.length < listings.length && (
-            <p className="text-sm text-slate-400 mb-3">
-              Mostrando {listingMarkers.length} de {listings.length} departamentos en el mapa
-              (los demás no tienen coordenadas registradas).
-            </p>
-          )}
-
-          <div className="h-[500px] sm:h-[600px] w-full rounded-2xl overflow-hidden shadow-lg">
-            {!MapComp ? (
-              // Mapa aún cargando (import() en progreso)
-              <div className="flex items-center justify-center h-full bg-slate-50 rounded-2xl border border-slate-100">
-                <Spinner size="lg" />
-              </div>
-            ) : listingMarkers.length === 0 ? (
-              // Ningún listing tiene coordenadas
-              <div className="flex flex-col items-center justify-center h-full bg-slate-50 rounded-2xl border border-dashed border-slate-200 gap-4">
-                <span className="text-5xl opacity-30">🗺️</span>
-                <p className="text-slate-400 font-medium text-center max-w-xs">
-                  Ningún departamento de esta ciudad tiene coordenadas registradas todavía.
-                </p>
-              </div>
-            ) : (
-              <MapComp
-                center={CITY_CENTERS[filters.city] || [-25.2867, -57.647]}
-                listingMarkers={listingMarkers}
-                height="100%"
-              />
-            )}
-          </div>
+        // ── VISTA GRID (original, sin cambios) ────────────────────────────
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
+          {listings.map(l => <ListingCard key={l.id} listing={l} />)}
         </div>
       )}
     </div>

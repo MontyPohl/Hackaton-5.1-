@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   Edit2, MessageCircle, UserPlus, Flag, Star,
-  MapPin, Briefcase, Calendar, ShieldCheck, UserMinus, Lock,
+  // ── CAMBIO 1: Agregamos Map2 para el botón "Ver en mapa" ──────────────────
+  // Map2 es la versión sólida del ícono de mapa en lucide-react
+  MapPin, Briefcase, Calendar, ShieldCheck, UserMinus, Lock, Map,
 } from 'lucide-react';
 import api from '../services/api';
 import useAuthStore from '../context/authStore';
@@ -11,10 +13,6 @@ import { toast } from 'react-hot-toast';
 import { motion } from 'motion/react';
 
 // ─── Sub-componente: Input de estrellas ───────────────────────────────────────
-/**
- * Selector de estrellas para el formulario de reseña.
- * Componente separado por responsabilidad única (Single Responsibility).
- */
 const StarInput = ({ value, onChange }) => (
   <div className="flex gap-1" role="group" aria-label="Calificación">
     {[1, 2, 3, 4, 5].map((star) => (
@@ -95,26 +93,38 @@ export default function ProfilePage() {
     }
   }, [targetId, isMe]);
 
-  /**
-   * ✅ NUEVO: Lógica wasRoomie basada en current_roomie_id.
-   *
-   * Condición: el usuario autenticado (me) y el perfil visitado (targetId)
-   * se consideran "roomies" si alguno de los dos tiene al otro como
-   * current_roomie_id.
-   *
-   * Por qué importa: la regla de negocio dice que solo se puede reseñar
-   * a alguien con quien se fue roomie, para evitar reseñas falsas.
-   *
-   * LIMITACIÓN ACTUAL: Solo detecta roomies ACTUALES (current_roomie_id).
-   * Para detectar roomies PASADOS se necesitaría una tabla
-   * `roommate_history` (pendiente en el backend).
-   */
   const wasRoomie = !isMe && Boolean(
     myProfile?.current_roomie_id === targetId ||
     profile?.current_roomie_id === me?.id,
   );
 
-  // ── Handlers ───────────────────────────────────────────────────────────────
+  // ── CAMBIO 2: Handler para navegar al mapa ─────────────────────────────────
+  //
+  // ¿Cómo funciona la comunicación entre páginas?
+  // React Router permite pasar datos entre rutas a través de `navigate()`.
+  // El segundo argumento `{ state: {...} }` guarda datos en la "memoria del router"
+  // que solo dura mientras la sesión de navegación está activa.
+  //
+  // En ListingsPage, usaremos `useLocation().state` para leer estos datos
+  // y hacer foco en las coordenadas del usuario.
+  //
+  // Los datos que pasamos:
+  //   flyTo:         [lat, lng] → Las coordenadas donde el mapa debe hacer foco
+  //   switchToMap:   true       → Le dice a ListingsPage que abra la vista mapa
+  const handleViewOnMap = () => {
+    if (!profile?.lat || !profile?.lng) {
+      toast.error('No tenés una ubicación guardada. Editá tu perfil para agregarla.')
+      return
+    }
+    navigate('/listings', {
+      state: {
+        flyTo: [profile.lat, profile.lng],
+        switchToMap: true,          // ListingsPage leerá esto para cambiar la vista
+      }
+    })
+  }
+
+  // ── Handlers existentes (sin cambios) ─────────────────────────────────────
   const respondRequest = async (reqId, action) => {
     try {
       const { data } = await api.put(`/requests/${reqId}/respond`, { action });
@@ -162,29 +172,10 @@ export default function ProfilePage() {
     } catch { toast.error('Error al enviar el reporte'); }
   };
 
-  /**
-   * ✅ NUEVO: Handler "Dejar de ser roomie".
-   *
-   * Solo frontend por ahora. Preparado para conectar al backend.
-   *
-   * TODO (backend): PUT /api/profiles/me con { current_roomie_id: null }
-   * IMPORTANTE: el endpoint debe también limpiar el current_roomie_id
-   * del otro usuario (transacción doble). Ver profile_routes.py.
-   */
   const handleLeaveRoomie = () => {
-    // TODO: descomentar cuando el backend esté listo:
-    // await api.put('/profiles/me', { current_roomie_id: null });
-    // updateProfile({ ...myProfile, current_roomie: null, current_roomie_id: null });
-    // setRoommate(null);
     toast('Esta acción estará disponible próximamente.', { icon: '🚧' });
   };
 
-  /**
-   * ✅ NUEVO: Handler para enviar una reseña.
-   *
-   * Solo se puede llegar aquí si wasRoomie === true (la UI lo bloquea de otra forma).
-   * El endpoint /reviews/ ya existe en review_routes.py.
-   */
   const handleSubmitReview = async () => {
     if (reviewRating === 0) { toast.error('Seleccioná al menos 1 estrella'); return; }
     setSubmittingReview(true);
@@ -198,7 +189,6 @@ export default function ProfilePage() {
       setShowReviewForm(false);
       setReviewComment('');
       setReviewRating(5);
-      // Recargar las reseñas del perfil
       const { data } = await api.get(`/reviews/user/${targetId}`);
       setReviews(data.reviews);
     } catch (e) {
@@ -258,10 +248,44 @@ export default function ProfilePage() {
                     </Badge>
                   )}
                 </div>
+
+                {/* Datos del perfil: edad, profesión, ciudad */}
                 <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 text-blue-900/60 font-bold">
                   {profile.age       && <span className="flex items-center gap-1.5"><Calendar size={16} className="text-orange-500" /> {profile.age} años</span>}
                   {profile.profession && <span className="flex items-center gap-1.5"><Briefcase size={16} className="text-orange-500" /> {profile.profession}</span>}
-                  {profile.city      && <span className="flex items-center gap-1.5"><MapPin size={16} className="text-orange-500" /> {profile.city}</span>}
+                  {profile.city      && (
+                    <span className="flex items-center gap-1.5">
+                      <MapPin size={16} className="text-orange-500" />
+                      {profile.city}
+
+                      {/* ── CAMBIO 3: Botón "Ver en mapa" ───────────────────── */}
+                      {/*
+                       * Condiciones para mostrar el botón:
+                       * 1. isMe → Solo el propio usuario ve este botón
+                       * 2. profile.lat && profile.lng → Solo si tiene ubicación guardada
+                       *
+                       * Al hacer clic llama a handleViewOnMap() que navega a
+                       * /listings pasando las coordenadas y la orden de abrir el mapa.
+                       *
+                       * Si no tiene ubicación, muestra un toast explicativo
+                       * (ver handleViewOnMap arriba).
+                       */}
+                      {isMe && (
+                        <button
+                          onClick={handleViewOnMap}
+                          title={profile.lat && profile.lng
+                            ? 'Ver tu ubicación en el mapa de departamentos'
+                            : 'Agregá tu ubicación en Editar Perfil para usar esta función'
+                          }
+                          className="ml-1 inline-flex items-center gap-1 text-xs font-bold text-orange-500
+                            hover:text-orange-600 hover:bg-orange-50 px-2 py-0.5 rounded-lg transition-all"
+                        >
+                          <Map size={12} />
+                          Ver en mapa
+                        </button>
+                      )}
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -307,13 +331,6 @@ export default function ProfilePage() {
                   {isMe ? `Soy roomie de ${roommate.name}` : `Es roomie de ${roommate.name}`}
                 </div>
 
-                {/*
-                 * ✅ NUEVO: Botón "Dejar de ser roomie"
-                 *
-                 * Solo visible para el propio usuario (isMe) cuando tiene un roomie activo.
-                 * Handler conectado al mock → listo para backend.
-                 * Estilo: texto pequeño, rojo, discreto → acción destructiva poco frecuente.
-                 */}
                 {isMe && (
                   <button
                     onClick={handleLeaveRoomie}
@@ -445,18 +462,7 @@ export default function ProfilePage() {
             )}
           </div>
 
-          {/*
-           * ✅ NUEVO: Sección "Escribir reseña"
-           *
-           * Solo visible para usuarios que visitan el perfil de otra persona.
-           * Se muestra en DOS estados:
-           *   1. wasRoomie === true → formulario habilitado
-           *   2. wasRoomie === false → estado bloqueado con explicación
-           *
-           * Por qué importa esta distinción:
-           *   Previene reseñas de personas que nunca convivieron juntas,
-           *   lo que protege la reputación de los usuarios en la plataforma.
-           */}
+          {/* Formulario de reseña */}
           {!isMe && (
             <div className="card">
               <h2 className="font-display font-extrabold text-2xl text-slate-900 mb-4">
@@ -464,7 +470,6 @@ export default function ProfilePage() {
               </h2>
 
               {wasRoomie ? (
-                /* ── Formulario habilitado (fueron roomies) ── */
                 showReviewForm ? (
                   <div className="space-y-5">
                     <div>
@@ -485,18 +490,10 @@ export default function ProfilePage() {
                       />
                     </div>
                     <div className="flex gap-3 pt-2 border-t border-slate-50">
-                      <button
-                        type="button"
-                        onClick={() => setShowReviewForm(false)}
-                        className="flex-1 btn-ghost"
-                      >
+                      <button type="button" onClick={() => setShowReviewForm(false)} className="flex-1 btn-ghost">
                         Cancelar
                       </button>
-                      <button
-                        onClick={handleSubmitReview}
-                        disabled={submittingReview}
-                        className="flex-1 btn-primary"
-                      >
+                      <button onClick={handleSubmitReview} disabled={submittingReview} className="flex-1 btn-primary">
                         {submittingReview ? 'Enviando...' : 'Enviar reseña'}
                       </button>
                     </div>
@@ -513,16 +510,12 @@ export default function ProfilePage() {
                   </button>
                 )
               ) : (
-                /* ── Estado bloqueado (no fueron roomies) ── */
                 <div className="flex flex-col items-center gap-3 py-6 px-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-center">
                   <Lock size={28} className="text-slate-300" />
                   <div>
-                    <p className="font-bold text-slate-500 mb-1">
-                      Reseña no disponible
-                    </p>
+                    <p className="font-bold text-slate-500 mb-1">Reseña no disponible</p>
                     <p className="text-sm text-slate-400 max-w-xs">
                       Solo podés reseñar a alguien con quien hayas sido roomie.
-                      Si conviviste con esta persona, la opción se habilitará automáticamente.
                     </p>
                   </div>
                 </div>
@@ -569,14 +562,8 @@ export default function ProfilePage() {
         <Modal open={reportModal} onClose={() => setReportModal(false)} title="Reportar usuario">
           <div className="space-y-6">
             <div className="space-y-2">
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">
-                Motivo
-              </label>
-              <select
-                className="input"
-                value={reportReason}
-                onChange={(e) => setReportReason(e.target.value)}
-              >
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Motivo</label>
+              <select className="input" value={reportReason} onChange={(e) => setReportReason(e.target.value)}>
                 <option value="fake_profile">Perfil falso</option>
                 <option value="inappropriate">Contenido inapropiado</option>
                 <option value="spam">Spam</option>
@@ -585,9 +572,7 @@ export default function ProfilePage() {
               </select>
             </div>
             <div className="space-y-2">
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">
-                Descripción (opcional)
-              </label>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Descripción (opcional)</label>
               <textarea
                 className="input resize-none h-32"
                 value={reportDesc}
@@ -596,12 +581,8 @@ export default function ProfilePage() {
               />
             </div>
             <div className="flex gap-3 pt-4">
-              <button onClick={() => setReportModal(false)} className="flex-1 btn-ghost">
-                Cancelar
-              </button>
-              <button onClick={handleReport} className="flex-1 btn-primary">
-                Enviar reporte
-              </button>
+              <button onClick={() => setReportModal(false)} className="flex-1 btn-ghost">Cancelar</button>
+              <button onClick={handleReport} className="flex-1 btn-primary">Enviar reporte</button>
             </div>
           </div>
         </Modal>
