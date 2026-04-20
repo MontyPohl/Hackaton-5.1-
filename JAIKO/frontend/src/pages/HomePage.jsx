@@ -15,7 +15,11 @@ import {
   ChevronRight
 } from "lucide-react";
 
-import Logo from "../components/ui/Logo"; // <-- Esta ruta está bien si la carpeta components está en la raíz.
+// ── CAMBIO 1: Importamos el store de autenticación ────────────────────────────
+// useAuthStore nos da acceso al estado global del usuario (si está logueado o no)
+import useAuthStore from '../context/authStore'
+
+import Logo from "../components/ui/Logo";
 
 const FEATURES = [
   { 
@@ -72,6 +76,17 @@ const STEPS = [
 const HomePage = () => {
   const [current, setCurrent] = useState(0);
   const [isScrolled, setIsScrolled] = useState(false);
+
+  // ── CAMBIO 2: Leemos el estado de autenticación ───────────────────────────
+  // Importante: destruturamos 'token' además de 'isAuthenticated'.
+  // Esto hace que React "escuche" los cambios de token en el store.
+  // Cuando el usuario se loguea o desloguea, token cambia → React re-renderiza
+  // la página → loggedIn se recalcula con el valor correcto.
+  const { isAuthenticated, token } = useAuthStore()
+
+  // Calculamos si está logueado una sola vez y lo guardamos en esta variable.
+  // La usaremos en el JSX para decidir qué botones mostrar.
+  const loggedIn = isAuthenticated()
 
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 20);
@@ -142,19 +157,43 @@ const HomePage = () => {
             {SLIDES[current].subtitle}
           </motion.p>
 
+          {/* ── CAMBIO 3: Botones del Hero con renderizado condicional ──────── */}
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.6 }}
             className="flex flex-col sm:flex-row items-center justify-center gap-4"
           >
-            <Link to="/login" className="group relative px-8 py-4 bg-orange-500 text-white rounded-2xl font-bold text-lg overflow-hidden transition-all hover:scale-105 active:scale-95 shadow-2xl shadow-orange-500/40">
-              <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-              <span className="relative flex items-center gap-2">
-                EMPEZAR AHORA <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-              </span>
-            </Link>
-            <a href="#how-it-works" className="px-8 py-4 rounded-2xl font-bold text-lg border border-orange-200 bg-white/50 text-blue-950 hover:bg-orange-50 transition-all backdrop-blur-sm">
+            {loggedIn ? (
+              // ✅ Usuario YA logueado → lo mandamos a buscar roomies
+              // No tiene sentido mostrarle "Empezar ahora" si ya tiene sesión
+              <Link
+                to="/search"
+                className="group relative px-8 py-4 bg-orange-500 text-white rounded-2xl font-bold text-lg overflow-hidden transition-all hover:scale-105 active:scale-95 shadow-2xl shadow-orange-500/40"
+              >
+                <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
+                <span className="relative flex items-center gap-2">
+                  BUSCAR ROOMIE <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                </span>
+              </Link>
+            ) : (
+              // 🚪 Usuario NO logueado → lo mandamos a login/registro
+              <Link
+                to="/login"
+                className="group relative px-8 py-4 bg-orange-500 text-white rounded-2xl font-bold text-lg overflow-hidden transition-all hover:scale-105 active:scale-95 shadow-2xl shadow-orange-500/40"
+              >
+                <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
+                <span className="relative flex items-center gap-2">
+                  EMPEZAR AHORA <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                </span>
+              </Link>
+            )}
+
+            {/* Este botón se muestra siempre, logueado o no */}
+            <a
+              href="#how-it-works"
+              className="px-8 py-4 rounded-2xl font-bold text-lg border border-orange-200 bg-white/50 text-blue-950 hover:bg-orange-50 transition-all backdrop-blur-sm"
+            >
               Ver cómo funciona
             </a>
           </motion.div>
@@ -266,9 +305,25 @@ const HomePage = () => {
             <h2 className="relative z-10 text-4xl md:text-6xl font-display font-extrabold mb-8 tracking-tight text-white">
               ¿Listo para encontrar <br /> a tu roomie ideal?
             </h2>
-            <Link to="/login" className="relative z-10 inline-flex items-center gap-3 px-10 py-5 bg-white text-orange-500 rounded-2xl font-bold text-xl hover:scale-105 active:scale-95 transition-all shadow-xl">
-              EMPEZAR AHORA <ChevronRight />
-            </Link>
+
+            {/* ── CAMBIO 4: Botón del CTA final con renderizado condicional ── */}
+            {loggedIn ? (
+              // ✅ Logueado → lo llevamos directo a buscar roomies
+              <Link
+                to="/search"
+                className="relative z-10 inline-flex items-center gap-3 px-10 py-5 bg-white text-orange-500 rounded-2xl font-bold text-xl hover:scale-105 active:scale-95 transition-all shadow-xl"
+              >
+                BUSCAR ROOMIE <ChevronRight />
+              </Link>
+            ) : (
+              // 🚪 No logueado → lo mandamos a login
+              <Link
+                to="/login"
+                className="relative z-10 inline-flex items-center gap-3 px-10 py-5 bg-white text-orange-500 rounded-2xl font-bold text-xl hover:scale-105 active:scale-95 transition-all shadow-xl"
+              >
+                EMPEZAR AHORA <ChevronRight />
+              </Link>
+            )}
           </div>
         </div>
       </section>

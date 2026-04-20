@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-hot-toast'
-import { Camera, Loader2 } from 'lucide-react'
+// ── CAMBIO 1: Agregamos el ícono Lock para indicar campo bloqueado ─────────────
+import { Camera, Loader2, Lock } from 'lucide-react'
 import api from '../services/api'
 import { uploadProfilePhoto } from '../services/storage'
 import useAuthStore from '../context/authStore'
@@ -34,9 +35,19 @@ const CITY_COORDS = {
 }
 
 export default function EditProfilePage() {
-  const { profile, updateProfile } = useAuthStore()
+  // ── CAMBIO 2: Agregamos 'user' al destructuring ────────────────────────────
+  // Antes solo teníamos { profile, updateProfile }
+  // Ahora también traemos 'user' para poder leer user.google_id
+  const { profile, updateProfile, user } = useAuthStore()
   const navigate   = useNavigate()
   const fileInputRef = useRef(null)
+
+  // ── CAMBIO 3: Detectamos si el usuario se registró con Google ─────────────
+  // Boolean() convierte cualquier valor a true/false limpio:
+  //   - Si user.google_id tiene valor (ej: "109876543210") → isGoogleUser = true
+  //   - Si user.google_id es null/undefined               → isGoogleUser = false
+  // El ?. (optional chaining) evita errores si 'user' todavía es null
+  const isGoogleUser = Boolean(user?.google_id)
 
   const defaultLat = -25.28646
   const defaultLng = -57.64700
@@ -121,8 +132,12 @@ export default function EditProfilePage() {
     }
   }
 
+  // ── CAMBIO 4: Label ahora acepta children como elemento React ─────────────
+  // Esto permite que el label de Género tenga el badge "(desde Google)"
   const Label = ({ children }) => (
-    <label className="block text-xs font-semibold text-orange-500 uppercase tracking-wide mb-1">{children}</label>
+    <label className="flex items-center gap-1 text-xs font-semibold text-orange-500 uppercase tracking-wide mb-1">
+      {children}
+    </label>
   )
 
   function LocationMarker() {
@@ -184,13 +199,41 @@ export default function EditProfilePage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
           <div><Label>Nombre completo *</Label><input className="input" value={form.name} onChange={setField('name')} required /></div>
           <div><Label>Edad</Label><input className="input" type="number" min={18} max={80} value={form.age} onChange={setField('age')} /></div>
+
+          {/* ── CAMBIO 5: Campo Género con lógica condicional ─────────────── */}
           <div>
-            <Label>Género</Label>
-            <select className="input" value={form.gender} onChange={setField('gender')}>
-              <option value="">Prefiero no decir</option>
-              {GENDERS.map(g => <option key={g} value={g}>{GENDER_LABELS[g]}</option>)}
-            </select>
+            <Label>
+              Género
+              {/* Mostramos el badge solo si es usuario de Google */}
+              {isGoogleUser && (
+                <span className="ml-1 text-[10px] font-normal text-slate-400 normal-case tracking-normal">
+                  (desde Google)
+                </span>
+              )}
+            </Label>
+
+            {isGoogleUser ? (
+              // 🔒 MODO SOLO LECTURA para usuarios de Google
+              // Usamos un div con las mismas clases CSS que "input"
+              // para que tenga el mismo tamaño y apariencia visual
+              <div
+                className="input bg-slate-50 text-slate-500 cursor-not-allowed flex items-center justify-between"
+                title="Este dato viene de tu cuenta de Google y no puede editarse"
+              >
+                {/* GENDER_LABELS convierte 'male' → 'Hombre', 'female' → 'Mujer', etc. */}
+                <span>{GENDER_LABELS[form.gender] || 'No especificado'}</span>
+                {/* Ícono de candado para indicar visualmente que está bloqueado */}
+                <Lock size={14} className="text-slate-400 flex-shrink-0" />
+              </div>
+            ) : (
+              // ✏️ MODO EDITABLE para usuarios con email y contraseña
+              <select className="input" value={form.gender} onChange={setField('gender')}>
+                <option value="">Prefiero no decir</option>
+                {GENDERS.map(g => <option key={g} value={g}>{GENDER_LABELS[g]}</option>)}
+              </select>
+            )}
           </div>
+
           <div><Label>Profesión / ocupación</Label><input className="input" value={form.profession} onChange={setField('profession')} /></div>
           <div>
             <Label>Ciudad</Label>
