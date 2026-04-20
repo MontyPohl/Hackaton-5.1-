@@ -98,6 +98,15 @@ export default function ProfilePage() {
     profile?.current_roomie_id === me?.id,
   );
 
+  // ── isRoomie: indica si el usuario visitado es mi roomie ACTUAL ────────────
+  // Usamos current_roomie?.id porque el perfil devuelve el objeto completo,
+  // no solo el ID. Verificamos ambas direcciones por si la relación quedó
+  // registrada en uno solo de los dos perfiles.
+  const isRoomie = !isMe && Boolean(
+    myProfile?.current_roomie?.id === targetId ||
+    profile?.current_roomie?.id   === me?.id
+  );
+
   // ── CAMBIO 2: Handler para navegar al mapa ─────────────────────────────────
   //
   // ¿Cómo funciona la comunicación entre páginas?
@@ -156,7 +165,22 @@ export default function ProfilePage() {
     try {
       const { data } = await api.post(`/chats/private/${targetId}`);
       navigate(`/chat/${data.chat.id}`);
-    } catch { toast.error('Error al abrir el chat'); }
+    } catch (e) {
+      if (e.response?.status === 403) {
+        const { code, group_chat_id, error } = e.response.data
+
+        if (code === 'SAME_GROUP' && group_chat_id) {
+          // Están en el mismo grupo → redirigir al chat grupal
+          toast('Están en el mismo grupo. Abriendo chat del grupo...', { icon: '👥' })
+          navigate(`/chat/${group_chat_id}`)
+        } else {
+          // No son roomies u otro error de permisos
+          toast.error(error || 'No podés iniciar este chat')
+        }
+      } else {
+        toast.error('Error al abrir el chat')
+      }
+    }
   };
 
   const handleReport = async () => {
@@ -301,12 +325,37 @@ export default function ProfilePage() {
                       {requestSent ? 'Enviada' : 'Solicitar Roomie'}
                     </button>
                   )}
-                  <button
-                    onClick={handleOpenChat}
-                    className="btn-secondary flex items-center gap-2 py-2.5"
-                  >
-                    <MessageCircle size={18} /> Chat
-                  </button>
+
+                  {/* ── Botón Chat con lógica de permisos ────────────────── */}
+                  {/*
+                   * El chat privado solo está permitido entre roomies confirmados.
+                   * Si NO son roomies → mostramos el botón bloqueado con tooltip.
+                   * Si SÍ son roomies → botón funcional que abre el chat privado
+                   *   (o redirige al grupo si están en el mismo grupo).
+                   *
+                   * El candado es intencional: le muestra al usuario que la función
+                   * existe pero que primero necesita confirmar una relación de roomie.
+                   */}
+                  {isRoomie ? (
+                    <button
+                      onClick={handleOpenChat}
+                      className="btn-secondary flex items-center gap-2 py-2.5"
+                    >
+                      <MessageCircle size={18} /> Chat
+                    </button>
+                  ) : (
+                    <div
+                      title="Aceptá una solicitud de roomie para poder chatear en privado"
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-2xl
+                        bg-slate-50 border-2 border-slate-100
+                        text-slate-300 text-sm font-bold
+                        cursor-not-allowed select-none"
+                    >
+                      <Lock size={16} />
+                      Chat
+                    </div>
+                  )}
+
                   <button
                     onClick={() => setReportModal(true)}
                     className="p-3 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all"

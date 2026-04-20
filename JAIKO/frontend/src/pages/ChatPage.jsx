@@ -197,7 +197,9 @@ export default function ChatPage() {
   };
 
   const getChatName = (chat) => {
-    if (chat.type === 'group') return `Grupo #${chat.group_id}`;
+    // Mejora: nombres más descriptivos que "Grupo #5"
+    if (chat.type === 'group')   return 'Chat del grupo';
+    if (chat.type === 'listing') return 'Consulta de depto';
     const other = chat.members?.find((m) => m.user_id !== user?.id);
     return other?.name ?? `Usuario #${other?.user_id}`;
   };
@@ -206,6 +208,14 @@ export default function ChatPage() {
     const other = chat.members?.find((m) => m.user_id !== user?.id);
     return other?.photo ?? null;
   };
+
+  // ── FIX LÍNEAS FANTASMA (segunda capa de defensa) ─────────────────────────
+  // El backend ya filtra los chats privados sin mensajes, pero lo repetimos
+  // acá por si hubiera chats cacheados en el estado antes del fix del backend.
+  // Los chats de grupo siempre se muestran aunque no tengan mensajes todavía.
+  const visibleChats = chats.filter(chat =>
+    chat.type !== 'private' || chat.last_message !== null
+  );
 
   const handleBack = () => {
     const s = socketRef.current;
@@ -232,19 +242,19 @@ export default function ChatPage() {
               Mensajes
             </h1>
             <p className="text-blue-900/40 text-sm font-bold">
-              {chats.length} conversaciones activas
+              {visibleChats.length} conversaciones activas
             </p>
           </div>
 
           {/* Lista de chats */}
           <div className="flex-1 overflow-y-auto p-4 space-y-2">
-            {chats.length === 0 ? (
+            {visibleChats.length === 0 ? (
               <div className="py-20 text-center">
                 <div className="text-4xl mb-4 opacity-20">💬</div>
                 <p className="text-slate-400 font-medium">Sin chats aún</p>
               </div>
             ) : (
-              chats.map((chat) => (
+              visibleChats.map((chat) => (
                 <button
                   key={chat.id}
                   onClick={() => selectChat(chat)}
@@ -465,3 +475,5 @@ export default function ChatPage() {
     </div>
   );
 }
+
+----------------------------------------
